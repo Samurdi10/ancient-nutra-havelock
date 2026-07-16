@@ -1,0 +1,130 @@
+/* App-specific styles, rebuilt on the SPINE tokens (see spine-ui.css).
+   Base type, buttons (.btn.*), inputs (.input), chips, tables (table.tbl),
+   the ATLAS rail and the app shell all come from spine-ui.css. Only the
+   pieces that file does not provide live here — and every value is a token. */
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.error {
+  color: var(--red);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.muted {
+  color: var(--ink3);
+  padding: 24px;
+  text-align: center;
+}
+
+/* Inline code (Supabase setup instructions) */
+code {
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1px 6px;
+  color: var(--ink);
+}
+
+.login-card label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--ink3);
+  text-align: left;
+}
+
+/* ── Login / setup / SSO splash (centered card, no rail) ────────────── */
+.login-page {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 32px;
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: var(--rlg);
+  box-shadow: var(--shmd);
+  text-align: left;
+}
+
+.login-card h1 {
+  font-size: 26px;
+  margin: 0;
+}
+
+.subtitle {
+  color: var(--ink2);
+  font-size: 13px;
+  margin: -4px 0 4px;
+}
+
+/* ── Modal (spine-ui.css provides no modal chrome) ──────────────────── */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 10;
+}
+
+.modal-card {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: var(--rlg);
+  box-shadow: var(--shmd);
+  padding: 24px;
+  width: 100%;
+  max-width: 780px;
+  max-height: 90vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  text-align: left;
+}
+
+.modal-card h2 {
+  font-size: 18px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+/* ── Report tables (table.tbl itself comes from spine-ui.css) ───────── */
+td.wrap {
+  white-space: normal;
+  min-width: 180px;
+}
+
+@media (max-width: 960px) {
+  .main > div[style*='grid-template-columns'] {
+    grid-template-columns: 1fr !important;
+  }
+}

@@ -1,0 +1,9 @@
+/* Base type, color, body and reset are owned by spine-ui.css.
+   Only genuinely app-specific structural rules live here. */
+
+#root {
+  width: 100%;
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+}

@@ -1,0 +1,184 @@
+/* ============================================================================
+   spine-ui.css — the SRV / SPINE design system, as a drop-in stylesheet.
+   ----------------------------------------------------------------------------
+   One file. Link it, use the classes, and any app looks like it belongs in the
+   SPINE nerve system: Sora type, warm-cream + forest-green palette, the ATLAS
+   sidebar rail, light/dark via `data-theme`. Tokens are the SAME as the SPINE
+   app's src/index.css — this is that system, made portable for standalone apps.
+
+   FONT: load Sora yourself (it is not bundled here). Either self-host a woff2
+   @font-face, or add <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&display=swap" rel="stylesheet">.
+   The stack falls back to system sans, so nothing breaks if Sora is absent.
+
+   DARK MODE: set data-theme="dark" (or "light") on <html>. See the toggle
+   snippet at the bottom of DESIGN-KIT.md.
+   ============================================================================ */
+
+:root {
+  --bg:#f0eee9; --surface:#fafaf7; --white:#fff;
+  --ink:#1a1a17; --ink2:#52524e; --ink3:#9e9e98;
+  --border:#e4e3dc; --border2:#c8c7bf;
+  --green:#1a5c3a; --green-bg:#e8f5ee; --green-mid:#3d9970;
+  --amber:#7a4e0a; --amber-bg:#fef3e0;
+  --red:#a01818; --red-bg:#fef0f0;
+  --blue:#1c4f8a; --blue-bg:#e8f0fb;
+  --accent:#1c3528; --accent2:#2d5c42;
+  --sh:0 1px 3px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.04);
+  --shmd:0 4px 20px rgba(0,0,0,.09),0 1px 4px rgba(0,0,0,.05);
+  --r:10px; --rlg:16px;
+  --font:"Sora",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+}
+html[data-theme="dark"] {
+  --bg:#0e1712; --surface:#13201a; --white:#17241d;
+  --ink:#ecf1ec; --ink2:#aebab1; --ink3:#76837a;
+  --border:#27352d; --border2:#39483f;
+  --green:#4fb488; --green-bg:#13241b; --green-mid:#3d9970;
+  --amber:#e0a93b; --amber-bg:#241b0e;
+  --red:#f08585; --red-bg:#241314;
+  --blue:#7ab0f0; --blue-bg:#14202e;
+  --accent:#1e3a2b; --accent2:#3d9970;
+  --sh:0 1px 3px rgba(0,0,0,.4),0 1px 2px rgba(0,0,0,.3);
+  --shmd:0 4px 20px rgba(0,0,0,.5),0 1px 4px rgba(0,0,0,.4);
+}
+
+/* ── base ─────────────────────────────────────────────────────────────── */
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font);
+  -webkit-font-smoothing:antialiased;font-size:14px;line-height:1.45}
+a{color:inherit}
+button{font-family:inherit;cursor:pointer}
+:focus-visible{outline:2px solid var(--green-mid);outline-offset:2px;border-radius:6px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+/* ── app shell ────────────────────────────────────────────────────────── */
+.app{display:flex;min-height:100vh}
+
+/* ── ATLAS sidebar rail (the SPINE signature) ─────────────────────────── */
+.rail{width:230px;flex-shrink:0;position:sticky;top:0;height:100vh;overflow-y:auto;
+  background:linear-gradient(175deg,#234539 0%,#14271d 100%);
+  box-shadow:2px 0 16px rgba(0,0,0,.35);display:flex;flex-direction:column;padding:0 8px 16px;gap:2px}
+.r-logo{padding:18px 10px 14px;border-bottom:1px solid rgba(255,255,255,.08);margin-bottom:6px}
+.r-brand{font-weight:800;letter-spacing:1.5px;font-size:21px;color:#fff}
+.r-sub{font-size:10px;color:rgba(255,255,255,.45);margin-top:3px;letter-spacing:.3px}
+.r-sec{font-size:9px;font-weight:800;letter-spacing:.8px;text-transform:uppercase;
+  color:rgba(255,255,255,.28);padding:12px 12px 4px}
+.nav{display:flex;align-items:center;gap:10px;min-height:40px;padding:0 12px;border-radius:9px;
+  border:1px solid transparent;background:none;color:rgba(255,255,255,.62);font-size:13px;font-weight:500;
+  width:100%;text-align:left;transition:background .15s,color .15s,border-color .15s}
+.nav:hover{background:rgba(255,255,255,.08);color:#fff}
+.nav.active{background:rgba(45,92,66,.22);color:var(--green-mid);font-weight:600;border-color:rgba(45,92,66,.35)}
+.nav .ic{width:16px;height:16px;flex-shrink:0;opacity:.85}
+.nav .n-count{margin-left:auto;font-size:11px;font-weight:700;background:rgba(255,255,255,.12);
+  color:#fff;border-radius:20px;padding:1px 8px;min-width:22px;text-align:center}
+.nav.active .n-count{background:rgba(61,153,112,.28);color:#7fe0b0}
+.r-foot{margin-top:auto;padding-top:12px;border-top:1px solid rgba(255,255,255,.08);
+  display:flex;align-items:center;gap:10px}
+.r-av{width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,#2d5c42,#3d9970);
+  display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;color:#fff;flex-shrink:0}
+.r-uname{font-size:12.5px;color:#fff;font-weight:700}
+.r-urole{font-size:10.5px;color:rgba(255,255,255,.45)}
+.r-theme{margin-left:auto;width:32px;height:32px;border:1px solid rgba(255,255,255,.15);
+  background:rgba(255,255,255,.09);border-radius:8px;color:#fff;font-size:14px}
+.r-theme:hover{background:rgba(255,255,255,.18)}
+
+/* ── main column + topbar ─────────────────────────────────────────────── */
+.main{flex:1;min-width:0;padding:26px 32px 40px}
+.topbar{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:20px}
+h1{font-size:24px;font-weight:700;margin:0;letter-spacing:-.2px}
+.sub{color:var(--ink2);font-size:13px;margin-top:3px}
+.tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.search{display:flex;align-items:center;gap:8px;background:var(--white);border:1px solid var(--border);
+  border-radius:9px;padding:8px 12px;min-width:210px}
+.search input{border:none;background:none;outline:none;color:var(--ink);font-size:13px;width:100%;font-family:inherit}
+.search input::placeholder{color:var(--ink3)}
+.ctrl{background:var(--white);border:1px solid var(--border);border-radius:9px;color:var(--ink2);
+  font-size:13px;padding:8px 12px;font-family:inherit}
+.ctrl:hover{border-color:var(--border2)}
+
+/* ── KPI strip ────────────────────────────────────────────────────────── */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;margin-bottom:22px}
+.kpi{background:var(--white);border:1px solid var(--border);border-radius:var(--r);padding:16px 18px;box-shadow:var(--sh)}
+.kpi .k-lab{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--ink3)}
+.kpi .k-val{font-size:26px;font-weight:800;margin-top:8px;letter-spacing:-.5px;font-variant-numeric:tabular-nums}
+.kpi .k-sub{font-size:12px;color:var(--ink2);margin-top:3px}
+.kpi .k-strip{height:3px;border-radius:3px;margin-top:12px;background:var(--green-mid)}
+.kpi.alert{border-color:color-mix(in srgb,var(--red) 40%,var(--border))}
+.kpi.alert .k-val{color:var(--red)}
+.kpi.alert .k-strip{background:var(--red)}
+
+/* ── cards ────────────────────────────────────────────────────────────── */
+.list{display:flex;flex-direction:column;gap:14px}
+.card{background:var(--white);border:1px solid var(--border);border-radius:var(--rlg);
+  box-shadow:var(--sh);overflow:hidden;transition:box-shadow .18s,border-color .18s}
+.card:hover{box-shadow:var(--shmd);border-color:var(--border2)}
+.card.breach{border-left:4px solid var(--red)}   /* critical row accent */
+.card.low{border-left:4px solid var(--amber)}     /* warning row accent */
+.c-top{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding:18px 20px 4px}
+.c-cust{font-size:16px;font-weight:700;letter-spacing:-.1px}
+.c-meta{color:var(--ink2);font-size:12.5px;margin-top:3px}
+.c-chips{display:flex;gap:7px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.c-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:2px 20px;
+  margin:12px 20px;padding:14px 16px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r)}
+.f{padding:4px 0}
+.f label{display:block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--ink3);margin-bottom:3px}
+.f span{font-size:14px;font-weight:600;font-variant-numeric:tabular-nums}
+.f .money{font-size:15px;font-weight:800}
+.f .flag{color:var(--amber)}
+.c-act{display:flex;gap:9px;justify-content:flex-end;padding:4px 20px 18px}
+
+/* ── chips / status pills / age indicators ────────────────────────────── */
+.chip{font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px;text-transform:uppercase;
+  letter-spacing:.4px;white-space:nowrap}
+.chip.sent,.chip.info{background:var(--blue-bg);color:var(--blue)}
+.chip.nego,.chip.warn{background:var(--amber-bg);color:var(--amber)}
+.chip.acc,.chip.ok,.chip.done{background:var(--green-bg);color:var(--green)}
+.chip.bad,.chip.err{background:var(--red-bg);color:var(--red)}
+.age{font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px;display:inline-flex;gap:5px;align-items:center}
+.age.ok{background:var(--green-bg);color:var(--green)}
+.age.warn{background:var(--amber-bg);color:var(--amber)}
+.age.bad{background:var(--red-bg);color:var(--red)}
+.age .dot{width:6px;height:6px;border-radius:50%;background:currentColor}
+
+/* ── buttons ──────────────────────────────────────────────────────────── */
+.btn{border:none;border-radius:9px;font-size:13px;font-weight:600;padding:9px 18px;font-family:inherit;
+  transition:background .15s,border-color .15s,color .15s}
+.btn.pri{background:var(--green);color:#fff}
+.btn.pri:hover{background:var(--accent)}
+.btn.ghost{background:transparent;border:1px solid var(--border2);color:var(--ink2)}
+.btn.ghost:hover{border-color:var(--ink3);color:var(--ink)}
+.btn.warn{background:transparent;border:1px solid color-mix(in srgb,var(--red) 45%,var(--border));color:var(--red)}
+.btn.warn:hover{background:var(--red-bg)}
+.btn.sm{font-size:12px;padding:5px 12px;border-radius:7px}
+
+/* ── data table (for list/records screens like Price List) ────────────── */
+.panel{background:var(--white);border:1px solid var(--border);border-radius:var(--rlg);box-shadow:var(--sh);overflow:hidden}
+.tbl-wrap{overflow-x:auto}
+table.tbl{width:100%;border-collapse:collapse;font-size:13px}
+table.tbl thead th{position:sticky;top:0;background:var(--surface);text-align:left;
+  font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--ink3);
+  padding:10px 14px;border-bottom:1px solid var(--border);white-space:nowrap}
+table.tbl tbody td{padding:9px 14px;border-bottom:1px solid var(--border);vertical-align:middle}
+table.tbl tbody tr:last-child td{border-bottom:none}
+table.tbl tbody tr:hover{background:var(--surface)}
+table.tbl .num{text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
+
+/* ── forms ────────────────────────────────────────────────────────────── */
+label.fld{display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--ink3);margin-bottom:5px}
+.input,input.input,textarea.input,select.input{width:100%;background:var(--white);border:1px solid var(--border);
+  border-radius:9px;padding:9px 12px;font-family:inherit;font-size:14px;color:var(--ink);outline:none;transition:border-color .15s}
+.input:focus{border-color:var(--green-mid)}
+.input::placeholder{color:var(--ink3)}
+
+/* ── empty state ──────────────────────────────────────────────────────── */
+.empty{text-align:center;color:var(--ink3);font-size:14px;padding:56px 20px}
+.empty .e-icon{font-size:26px;margin-bottom:8px;opacity:.6}
+
+/* ── toast ────────────────────────────────────────────────────────────── */
+.toast{position:fixed;right:20px;bottom:20px;z-index:60;background:var(--white);color:var(--ink);
+  border:1px solid var(--border);border-left:4px solid var(--green-mid);border-radius:10px;
+  box-shadow:var(--shmd);padding:12px 16px;font-size:13px;font-weight:600;max-width:340px}
+.toast.err{border-left-color:var(--red)}
+.toast.warn{border-left-color:var(--amber)}
+
+/* ── responsive: rail collapses on narrow ─────────────────────────────── */
+@media (max-width:820px){.rail{display:none}.main{padding:20px 16px 36px}}
