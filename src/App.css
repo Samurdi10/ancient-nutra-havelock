@@ -128,3 +128,202 @@ td.wrap {
     grid-template-columns: 1fr !important;
   }
 }
+
+/* ── Date-range quick filters ─────────────────────────────────────────── */
+.range-tabs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+
+.range-custom {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.range-custom .input {
+  width: auto;
+}
+
+/* ── Bold colored stat cards (mirrors OMAK's dashboard tiles) ─────────── */
+.stat-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.stat-card {
+  border-radius: var(--rlg);
+  padding: 18px 20px;
+  color: #fff;
+  box-shadow: var(--sh);
+  position: relative;
+  overflow: hidden;
+}
+
+.stat-card .s-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.stat-card .s-lab {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.stat-card .s-ic {
+  font-size: 18px;
+  opacity: 0.9;
+}
+
+.stat-card .s-val {
+  font-size: 24px;
+  font-weight: 800;
+  margin-top: 10px;
+  letter-spacing: -0.3px;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-card .s-sub {
+  font-size: 12px;
+  font-weight: 600;
+  opacity: 0.9;
+  margin-top: 4px;
+}
+
+.stat-card.c-amber { background: linear-gradient(135deg, #f0a94e, #d98c2b); }
+.stat-card.c-blue { background: linear-gradient(135deg, #4a9fe0, #2c7bc2); }
+.stat-card.c-green { background: linear-gradient(135deg, var(--green-mid), var(--green)); }
+.stat-card.c-teal { background: linear-gradient(135deg, #3fc1c9, #1f9aa3); }
+.stat-card.c-red { background: linear-gradient(135deg, #ea6b6b, #cf4545); }
+.stat-card.c-purple { background: linear-gradient(135deg, #a678e0, #7d4fc2); }
+
+/* Small variant used for the per-payment-method card row */
+.stat-card.sm {
+  padding: 14px 16px;
+}
+
+.stat-card.sm .s-val {
+  font-size: 19px;
+  margin-top: 6px;
+}
+
+/* ── Top selling items: ranked horizontal bars ────────────────────────── */
+.bar-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.bar-row {
+  display: grid;
+  grid-template-columns: 1fr 3fr auto;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.bar-row .b-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink2);
+}
+
+.bar-row .b-track {
+  background: var(--surface);
+  border-radius: 6px;
+  height: 10px;
+  overflow: hidden;
+}
+
+.bar-row .b-fill {
+  height: 100%;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--green-mid), var(--green));
+}
+
+.bar-row .b-val {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* ── Hourly sales: simple CSS bar chart ───────────────────────────────── */
+.hourly-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 180px;
+  padding-top: 8px;
+}
+
+.hourly-chart .h-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  height: 100%;
+  gap: 6px;
+  min-width: 0;
+}
+
+.hourly-chart .h-bar {
+  width: 100%;
+  border-radius: 4px 4px 0 0;
+  background: linear-gradient(180deg, var(--blue), #2c7bc2);
+  min-height: 2px;
+}
+
+.hourly-chart .h-lab {
+  font-size: 10px;
+  color: var(--ink3);
+  white-space: nowrap;
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px 0;
+  gap: 10px;
+}
+
+.panel-head h3 {
+  font-size: 14px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.panel-body {
+  padding: 14px 16px 18px;
+}
+
+.toggle-pair {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  overflow: hidden;
+}
+
+.toggle-pair button {
+  border: none;
+  background: var(--white);
+  color: var(--ink2);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 12px;
+}
+
+.toggle-pair button.active {
+  background: var(--green);
+  color: #fff;
+}
