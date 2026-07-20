@@ -45,16 +45,27 @@ mismatches against the PDF's own stated totals as warnings.
 ### 1. Supabase (Multix project)
 
 1. In the Multix Supabase project, open **SQL Editor** and run
-   [`supabase/migrations/0001_init.sql`](supabase/migrations/0001_init.sql).
-   This creates the `havelock` schema, the `bills` and `bill_items` tables,
-   and RLS policies restricting access to authenticated staff.
-2. Go to **Project Settings → API → Exposed schemas** and add `havelock` to
-   the list (only `public` and `graphql_public` are exposed by default).
-3. Go to **Authentication → Users** and invite/create an account for each
+   [`supabase/migrations/0002_public_schema_fallback.sql`](supabase/migrations/0002_public_schema_fallback.sql).
+   This creates `havelock_bills` and `havelock_bill_items` in the `public`
+   schema, with RLS policies restricting access to authenticated staff.
+   ([`0001_init.sql`](supabase/migrations/0001_init.sql) creates the same
+   tables in a dedicated `havelock` schema — not used by the app currently,
+   see note below.)
+2. Go to **Authentication → Users** and invite/create an account for each
    person who needs access, with **Auto Confirm User** on. There's no public
    sign-up page. (Not needed if everyone signs in via the SPINE tile — see
    below.)
-4. Copy the project URL and anon public key from **Project Settings → API**.
+3. Copy the project URL and anon public key from **Project Settings → API**.
+
+**Note on schema:** the app originally used an isolated `havelock` schema
+(matching the `an_delivery` pattern), but Supabase's exposed-schema config got
+stuck out of sync with the running PostgREST instance for this project —
+`havelock` showed as exposed in the dashboard, yet API requests kept failing
+with `PGRST106: Invalid schema: havelock`. Toggling the schema on/off, a full
+project restart, and `NOTIFY pgrst, 'reload config'` / `'reload schema'` all
+failed to fix it (Supabase support ticket SU-426244). Tables were moved into
+`public` (prefixed `havelock_`) as a working fallback. If Supabase resolves
+the underlying bug, the app can be migrated back to a dedicated schema.
 
 ### 2. Local development
 

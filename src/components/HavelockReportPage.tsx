@@ -17,7 +17,7 @@ function itemsSummary(bill: Bill): string {
 async function saveParsedReport(parsed: ParsedReport, sourceFile: string): Promise<void> {
   for (const bill of parsed.bills) {
     const { data: billRow, error: billError } = await supabase
-      .from('bills')
+      .from('havelock_bills')
       .upsert(
         {
           report_date: parsed.reportDate,
@@ -35,8 +35,8 @@ async function saveParsedReport(parsed: ParsedReport, sourceFile: string): Promi
       .single()
     if (billError) throw billError
 
-    await supabase.from('bill_items').delete().eq('bill_id', billRow.id)
-    const { error: itemsError } = await supabase.from('bill_items').insert(
+    await supabase.from('havelock_bill_items').delete().eq('bill_id', billRow.id)
+    const { error: itemsError } = await supabase.from('havelock_bill_items').insert(
       bill.items.map((item) => ({
         bill_id: billRow.id,
         product_name: item.productName,
@@ -65,7 +65,7 @@ export function HavelockReportPage() {
 
   async function loadAvailableDates() {
     const { data, error } = await supabase
-      .from('bills')
+      .from('havelock_bills')
       .select('report_date')
       .order('report_date', { ascending: false })
     if (error) {
@@ -82,8 +82,8 @@ export function HavelockReportPage() {
     setLoading(true)
     setLoadError(null)
     const { data, error } = await supabase
-      .from('bills')
-      .select('*, bill_items(*)')
+      .from('havelock_bills')
+      .select('*, bill_items:havelock_bill_items(*)')
       .eq('report_date', date)
       .order('bill_time', { ascending: true })
     if (error) setLoadError(error.message)
