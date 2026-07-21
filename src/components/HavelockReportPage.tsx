@@ -10,10 +10,12 @@ function currentTheme(): string {
   return document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light'
 }
 
-function itemsSummary(bill: Bill): string {
-  return bill.bill_items
-    .map((item) => (item.quantity > 1 ? `${item.quantity} ${item.product_name}` : item.product_name))
-    .join(', ')
+/** One line per item, each carrying its own price — e.g. "2 Ashwagandha - 60 capsules — LKR 4,500". */
+function itemLines(bill: Bill): string[] {
+  return bill.bill_items.map((item) => {
+    const name = item.quantity > 1 ? `${item.quantity} ${item.product_name}` : item.product_name
+    return `${name} — LKR ${item.net_total.toLocaleString()}`
+  })
 }
 
 function isoDate(d: Date): string {
@@ -68,7 +70,7 @@ function downloadCsv(bills: Bill[], fileName: string) {
     b.bill_time,
     b.invoice_number,
     b.order_number ?? '',
-    itemsSummary(b),
+    itemLines(b).join('\n'),
     b.net_total,
     b.payment_method ?? '',
   ])
@@ -428,9 +430,12 @@ export function HavelockReportPage() {
                           <td>{bill.billTime}</td>
                           <td>{bill.invoiceNumber}</td>
                           <td className="wrap">
-                            {bill.items
-                              .map((it) => (it.quantity > 1 ? `${it.quantity} ${it.productName}` : it.productName))
-                              .join(', ')}
+                            {bill.items.map((it, idx) => (
+                              <div key={idx}>
+                                {it.quantity > 1 ? `${it.quantity} ${it.productName}` : it.productName} — LKR{' '}
+                                {it.netTotal.toLocaleString()}
+                              </div>
+                            ))}
                           </td>
                           <td className="num">{bill.netTotal.toLocaleString()}</td>
                           <td>{bill.paymentMethod}</td>
@@ -593,7 +598,11 @@ export function HavelockReportPage() {
                         <td>{bill.bill_time}</td>
                         <td>{bill.invoice_number}</td>
                         <td>{bill.order_number}</td>
-                        <td className="wrap">{itemsSummary(bill)}</td>
+                        <td className="wrap">
+                          {itemLines(bill).map((line, idx) => (
+                            <div key={idx}>{line}</div>
+                          ))}
+                        </td>
                         <td className="num">{bill.net_total.toLocaleString()}</td>
                         <td>{bill.payment_method}</td>
                       </tr>
