@@ -22,6 +22,15 @@ function isoDate(d: Date): string {
   return d.toISOString().slice(0, 10)
 }
 
+/** Loosely normalizes a product name for matching POS names against the website's — collapses whitespace/case/punctuation differences, not a fuzzy/NLP match. */
+function normalizeProductName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[()]/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
+
 function computeRange(preset: RangePreset, customStart: string, customEnd: string): { start: string; end: string } {
   const today = new Date()
   today.setHours(0, 0, 0, 0)
@@ -130,6 +139,7 @@ export function HavelockReportPage() {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [topItemsMode, setTopItemsMode] = useState<'qty' | 'revenue'>('qty')
+  const [productPrices, setProductPrices] = useState<Map<string, number>>(new Map())
 
   const [parsing, setParsing] = useState(false)
   const [parseError, setParseError] = useState<string | null>(null)
@@ -158,6 +168,20 @@ export function HavelockReportPage() {
     loadBillsForRange(range.start, range.end)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [range.start, range.end])
+
+  useEffect(() => {
+    async function loadPrices() {
+      const { data } = await supabase.from('havelock_product_prices').select('product_name, price')
+      const map = new Map<string, number>()
+      for (const row of data ?? []) map.set(normalizeProductName(row.product_name), row.price)
+      setProductPrices(map)
+    }
+    loadPrices()
+  }, [])
+
+  function currentPriceFor(productName: string): number | null {
+    return productPrices.get(normalizeProductName(productName)) ?? null
+  }
 
   function toggleTheme() {
     const next = theme === 'dark' ? 'light' : 'dark'
@@ -620,16 +644,21 @@ export function HavelockReportPage() {
                       <th>Product</th>
                       <th>Qty sold</th>
                       <th>Revenue</th>
+                      <th>Current Price</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {productBreakdown.map(([name, stats]) => (
-                      <tr key={name}>
-                        <td className="wrap">{name}</td>
-                        <td className="num">{stats.quantity}</td>
-                        <td className="num">{stats.revenue.toLocaleString()}</td>
-                      </tr>
-                    ))}
+                    {productBreakdown.map(([name, stats]) => {
+                      const price = currentPriceFor(name)
+                      return (
+                        <tr key={name}>
+                          <td className="wrap">{name}</td>
+                          <td className="num">{stats.quantity}</td>
+                          <td className="num">{stats.revenue.toLocaleString()}</td>
+                          <td className="num">{price !== null ? `LKR ${price.toLocaleString()}` : '—'}</td>
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>
