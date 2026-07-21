@@ -40,11 +40,18 @@ function isBillsHeader(text: string): boolean {
 }
 
 function isItemsHeader(text: string): boolean {
-  return /^Order Item\b/.test(text) && /Quantity/.test(text) && /Gross Total/.test(text) && /Discount/.test(text) && /NBT/.test(text) && /VAT/.test(text)
+  // VAT sometimes prints on this column-group and sometimes on the totals
+  // one (see isTotalsHeader) depending on how many columns fit per page, so
+  // it isn't part of this check — Order Item/Quantity/Gross Total/Discount/
+  // NBT are the columns that are always here.
+  return /^Order Item\b/.test(text) && /Quantity/.test(text) && /Gross Total/.test(text) && /Discount/.test(text) && /NBT/.test(text)
 }
 
 function isTotalsHeader(text: string): boolean {
-  return /^Net Total\b/.test(text) && /Payment Method/.test(text)
+  // Not anchored to the start of the row: a VAT column sometimes lands here
+  // instead of on the items header (see isItemsHeader), e.g. "VAT Net Total
+  // Payment Method" instead of just "Net Total Payment Method".
+  return /Net Total/.test(text) && /Payment Method/.test(text)
 }
 
 function isSummaryLine(text: string): boolean {
@@ -82,7 +89,11 @@ async function extractRows(pdf: pdfjsLib.PDFDocumentProxy): Promise<Row[]> {
     }
     for (const cluster of clusters) {
       cluster.sort((a, b) => a.x - b.x)
-      const tokens = cluster.map((i) => i.str)
+      // pdfjs sometimes reports two adjacent columns (e.g. an amount and the
+      // payment method next to it) as one text item with an internal space
+      // ("8,400.00 Cash"), which would otherwise fail numeric detection —
+      // split every item on whitespace so tokens are always single words.
+      const tokens = cluster.flatMap((i) => i.str.split(/\s+/).filter(Boolean))
       rows.push({ text: tokens.join(' '), tokens })
     }
   }
@@ -147,8 +158,11 @@ interface TotalsRowParsed {
 }
 
 function parseTotalsRow(row: Row): TotalsRowParsed {
-  const amountToken = row.tokens.find((t) => NUMERIC.test(t))
-  const netTotal = amountToken ? toNumber(amountToken) : null
+  // Net Total is always the LAST numeric token: some reports print an extra
+  // VAT column before it ("VAT Net Total Payment Method"), so taking the
+  // first numeric token would grab VAT (usually 0) instead.
+  const numericTokens = row.tokens.filter((t) => NUMERIC.test(t))
+  const netTotal = numericTokens.length > 0 ? toNumber(numericTokens[numericTokens.length - 1]) : null
   const paymentTokens = row.tokens.filter((t) => !NUMERIC.test(t))
   const paymentMethod = paymentTokens.join(' ').trim() || null
   return { netTotal, paymentMethod }
@@ -167,6 +181,13 @@ export async function parseHavelockReportPdf(file: File): Promise<ParsedReport> 
 
   let currentTable: TableKind = null
   const billState = { outlet: '', date: null as string | null }
+  // A long product name sometimes wraps onto its own line with no numeric
+  // columns at all (e.g. "MetaSystem (Pre & Post Meal Fat Burning" / "System)
+  // 1  10,500.00 ..."). That wrap line has no counterpart row on the totals
+  // page, so treating it as its own item row desyncs the items/totals row
+  // alignment for everything after it — buffer it and prepend it to the next
+  // real item row instead.
+  let pendingNamePrefix = ''
 
   for (const row of rows) {
     if (isBillsHeader(row.text)) {
@@ -194,7 +215,16 @@ export async function parseHavelockReportPdf(file: File): Promise<ParsedReport> 
       const entry = parseBillsRow(row, billState)
       if (entry) billList.push(entry)
     } else if (currentTable === 'items') {
-      itemsRows.push(parseItemsRow(row))
+      const parsed = parseItemsRow(row)
+      if (parsed.productName && parsed.numericCount === 0) {
+        pendingNamePrefix = pendingNamePrefix ? `${pendingNamePrefix} ${parsed.productName}` : parsed.productName
+        continue
+      }
+      if (pendingNamePrefix) {
+        parsed.productName = parsed.productName ? `${pendingNamePrefix} ${parsed.productName}` : pendingNamePrefix
+        pendingNamePrefix = ''
+      }
+      itemsRows.push(parsed)
     } else if (currentTable === 'totals') {
       totalsRows.push(parseTotalsRow(row))
     }
