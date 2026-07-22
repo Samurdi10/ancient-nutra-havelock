@@ -60,6 +60,8 @@ export interface StockEntryItem {
   quantity: number
   rate: number
   total: number
+  manufacturing_date: string | null
+  expiry_date: string | null
 }
 
 export interface StockEntry {

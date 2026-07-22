@@ -6,6 +6,21 @@ export interface ParsedStockRow {
   quantity: number
   /** null means "no rate in the source file — look it up from the price list". */
   rate: number | null
+  manufacturingDate: string | null
+  expiryDate: string | null
+}
+
+/** Normalizes a date cell (ISO, dd/mm/yyyy, or a JS Date already) to "yyyy-mm-dd", or null if unparseable. */
+function normalizeDateCell(raw: string): string | null {
+  const s = raw.trim()
+  if (!s) return null
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`
+  const dmy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+  if (dmy) return `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`
+  const parsed = new Date(s)
+  if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10)
+  return null
 }
 
 export interface ParsedStockUpload {
@@ -33,7 +48,14 @@ function parseOmakStockSummaryHtml(html: string): ParsedStockUpload {
     const productName = cells[0].textContent?.trim() ?? ''
     const quantity = Number((cells[1].textContent ?? '0').trim().replace(/,/g, '')) || 0
     if (!productName) continue
-    rows.push({ category: currentCategory, productName, quantity, rate: null })
+    rows.push({
+      category: currentCategory,
+      productName,
+      quantity,
+      rate: null,
+      manufacturingDate: null,
+      expiryDate: null,
+    })
   }
 
   return { source: 'omak-stock-summary', rows, warnings: [] }
@@ -97,6 +119,8 @@ function rowsFromTable(header: string[], dataRows: string[][]): ParsedStockUploa
   const qtyCol = columnIndex(header, [/closing stock/i, /^qty$|^quantity$/i, /qty|quantity/i])
   // "Cost Per Unit" (real cost) is preferred over a generic "Rate"/"Price" column.
   const rateCol = columnIndex(header, [/cost per unit/i, /rate|price/i])
+  const mfgCol = columnIndex(header, [/manufactur|mfg/i])
+  const expCol = columnIndex(header, [/expiry|expire|exp date/i])
   const warnings: string[] = []
   if (nameCol === -1 || qtyCol === -1) {
     warnings.push(
@@ -110,7 +134,9 @@ function rowsFromTable(header: string[], dataRows: string[][]): ParsedStockUploa
     if (!productName) continue
     const quantity = Number((r[qtyCol] ?? '0').replace(/,/g, '')) || 0
     const rate = rateCol !== -1 && r[rateCol]?.trim() ? Number(r[rateCol].replace(/,/g, '')) : null
-    rows.push({ category: null, productName, quantity, rate })
+    const manufacturingDate = mfgCol !== -1 ? normalizeDateCell(r[mfgCol] ?? '') : null
+    const expiryDate = expCol !== -1 ? normalizeDateCell(r[expCol] ?? '') : null
+    rows.push({ category: null, productName, quantity, rate, manufacturingDate, expiryDate })
   }
   return { source: 'template', rows, warnings }
 }
@@ -129,7 +155,13 @@ async function parseXlsxTemplate(buffer: ArrayBuffer): Promise<ParsedStockUpload
   const table: string[][] = []
   sheet.eachRow((row) => {
     const values = row.values as unknown[]
-    table.push(values.slice(1).map((v) => (v === null || v === undefined ? '' : String(v))))
+    table.push(
+      values.slice(1).map((v) => {
+        if (v === null || v === undefined) return ''
+        if (v instanceof Date) return v.toISOString().slice(0, 10)
+        return String(v)
+      }),
+    )
   })
   if (table.length === 0) return { source: 'template', rows: [], warnings: ['This sheet is empty.'] }
   return rowsFromTable(table[0], table.slice(1))

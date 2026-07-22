@@ -141,6 +141,8 @@ interface DraftStockItem {
   productName: string
   quantity: number
   rate: number
+  manufacturingDate: string | null
+  expiryDate: string | null
 }
 
 export function HavelockReportPage() {
@@ -245,7 +247,10 @@ export function HavelockReportPage() {
   function addDraftStockItem(row: PriceRow) {
     setDraftStockItems((prev) => {
       if (prev.some((it) => it.productName === row.product_name)) return prev
-      return [...prev, { productName: row.product_name, quantity: 1, rate: row.price }]
+      return [
+        ...prev,
+        { productName: row.product_name, quantity: 1, rate: row.price, manufacturingDate: null, expiryDate: null },
+      ]
     })
     setStockItemSearch('')
   }
@@ -274,7 +279,13 @@ export function HavelockReportPage() {
             noRateProducts.push(row.productName)
           }
         }
-        return { productName: row.productName, quantity: row.quantity, rate }
+        return {
+          productName: row.productName,
+          quantity: row.quantity,
+          rate,
+          manufacturingDate: row.manufacturingDate,
+          expiryDate: row.expiryDate,
+        }
       })
       if (noRateProducts.length > 0) {
         warnings.push(
@@ -329,6 +340,8 @@ export function HavelockReportPage() {
           quantity: it.quantity,
           rate: it.rate,
           total: it.quantity * it.rate,
+          manufacturing_date: it.manufacturingDate,
+          expiry_date: it.expiryDate,
         })),
       )
       if (itemsError) throw itemsError
@@ -654,6 +667,8 @@ export function HavelockReportPage() {
                             <th>Item Name</th>
                             <th>Qty</th>
                             <th>Rate</th>
+                            <th>Mfg Date</th>
+                            <th>Expiry Date</th>
                             <th>Total</th>
                             <th></th>
                           </tr>
@@ -661,7 +676,7 @@ export function HavelockReportPage() {
                         <tbody>
                           {draftStockItems.length === 0 ? (
                             <tr>
-                              <td colSpan={5} className="muted">
+                              <td colSpan={7} className="muted">
                                 No items added yet — search above to add one.
                               </td>
                             </tr>
@@ -687,6 +702,26 @@ export function HavelockReportPage() {
                                     style={{ width: 100 }}
                                     value={it.rate}
                                     onChange={(e) => updateDraftStockItem(idx, { rate: Number(e.target.value) })}
+                                  />
+                                </td>
+                                <td>
+                                  <input
+                                    className="input"
+                                    type="date"
+                                    style={{ width: 150 }}
+                                    value={it.manufacturingDate ?? ''}
+                                    onChange={(e) =>
+                                      updateDraftStockItem(idx, { manufacturingDate: e.target.value || null })
+                                    }
+                                  />
+                                </td>
+                                <td>
+                                  <input
+                                    className="input"
+                                    type="date"
+                                    style={{ width: 150 }}
+                                    value={it.expiryDate ?? ''}
+                                    onChange={(e) => updateDraftStockItem(idx, { expiryDate: e.target.value || null })}
                                   />
                                 </td>
                                 <td className="num">{(it.quantity * it.rate).toLocaleString()}</td>
@@ -751,12 +786,19 @@ export function HavelockReportPage() {
                         <th>Ref Doc No</th>
                         <th>Remarks</th>
                         <th>Items</th>
+                        <th>Nearest Expiry</th>
                         <th>Total</th>
                         <th></th>
                       </tr>
                     </thead>
                     <tbody>
-                      {stockEntries.map((entry) => (
+                      {stockEntries.map((entry) => {
+                        const expiries = entry.stock_entry_items
+                          .map((it) => it.expiry_date)
+                          .filter((d): d is string => d !== null)
+                          .sort()
+                        const nearestExpiry = expiries[0] ?? null
+                        return (
                         <tr key={entry.id}>
                           <td>{entry.entry_no}</td>
                           <td>{entry.entry_date}</td>
@@ -764,9 +806,14 @@ export function HavelockReportPage() {
                           <td className="wrap">{entry.remarks}</td>
                           <td className="wrap">
                             {entry.stock_entry_items
-                              .map((it) => `${it.quantity} ${it.product_name}`)
+                              .map((it) =>
+                                it.expiry_date
+                                  ? `${it.quantity} ${it.product_name} (exp ${it.expiry_date})`
+                                  : `${it.quantity} ${it.product_name}`,
+                              )
                               .join(', ')}
                           </td>
+                          <td>{nearestExpiry ?? '—'}</td>
                           <td className="num">LKR {entry.total.toLocaleString()}</td>
                           <td>
                             <button className="btn sm ghost" onClick={() => handleDeleteStockEntry(entry.id)}>
@@ -774,7 +821,8 @@ export function HavelockReportPage() {
                             </button>
                           </td>
                         </tr>
-                      ))}
+                        )
+                      })}
                     </tbody>
                   </table>
                 </div>
