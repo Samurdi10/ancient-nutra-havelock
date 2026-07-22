@@ -75,18 +75,32 @@ function parseCsvRows(text: string): string[][] {
   return rows
 }
 
-function columnIndex(header: string[], pattern: RegExp): number {
-  return header.findIndex((h) => pattern.test(h.trim()))
+// Patterns are tried in priority order (first match across the whole header
+// wins) so a more specific column — e.g. "Closing Stock", the actual on-hand
+// quantity in an inventory ledger export — is preferred over a generic but
+// misleading one that happens to appear earlier, like "Inward Qty (IN)".
+function columnIndex(header: string[], patterns: RegExp[]): number {
+  for (const pattern of patterns) {
+    const idx = header.findIndex((h) => pattern.test(h.trim()))
+    if (idx !== -1) return idx
+  }
+  return -1
 }
 
 function rowsFromTable(header: string[], dataRows: string[][]): ParsedStockUpload {
-  const nameCol = columnIndex(header, /product|item/i)
-  const qtyCol = columnIndex(header, /qty|quantity/i)
-  const rateCol = columnIndex(header, /rate|price/i)
+  // "Product Name (Description)" must win over "Item Code (SKU Code)" — both
+  // contain the word "item"/"product" depending on the exact wording, but only
+  // one is the actual product name.
+  const nameCol = columnIndex(header, [/product name|description/i, /^item$/i, /product|item/i])
+  // "Closing Stock" (current on-hand qty) must win over "Inward Qty (IN)" /
+  // "Outward Qty (OUT)" / "Expired Qty", which also match a bare /qty/ pattern.
+  const qtyCol = columnIndex(header, [/closing stock/i, /^qty$|^quantity$/i, /qty|quantity/i])
+  // "Cost Per Unit" (real cost) is preferred over a generic "Rate"/"Price" column.
+  const rateCol = columnIndex(header, [/cost per unit/i, /rate|price/i])
   const warnings: string[] = []
   if (nameCol === -1 || qtyCol === -1) {
     warnings.push(
-      'Could not find a "Product Name" and "Quantity" column in this file. Expected headers like Product Name, Quantity, Rate (Rate is optional).',
+      'Could not find a product name and quantity column in this file. Expected headers like "Product Name" + "Quantity", or "Product Name (Description)" + "Closing Stock".',
     )
     return { source: 'template', rows: [], warnings }
   }
