@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { parseHavelockReportPdf } from '../lib/parseHavelockReport'
-import type { Bill, ParsedReport } from '../types'
+import type { Bill, ParsedReport, StockEntry } from '../types'
 
 type RangePreset = 'today' | 'yesterday' | 'last7' | 'thismonth' | 'custom'
 
@@ -130,8 +130,33 @@ async function saveParsedReport(parsed: ParsedReport, sourceFile: string): Promi
   }
 }
 
+interface PriceRow {
+  product_name: string
+  price: number
+  compare_at_price: number | null
+}
+
+interface DraftStockItem {
+  productName: string
+  quantity: number
+  rate: number
+}
+
 export function HavelockReportPage() {
   const [theme, setTheme] = useState<string>(currentTheme())
+  const [activeSection, setActiveSection] = useState<'report' | 'prices' | 'stock'>('report')
+  const [priceRows, setPriceRows] = useState<PriceRow[]>([])
+  const [priceSearch, setPriceSearch] = useState('')
+  const [stockEntries, setStockEntries] = useState<StockEntry[]>([])
+  const [stockLoading, setStockLoading] = useState(true)
+  const [stockError, setStockError] = useState<string | null>(null)
+  const [showStockForm, setShowStockForm] = useState(false)
+  const [savingStockEntry, setSavingStockEntry] = useState(false)
+  const [stockEntryDate, setStockEntryDate] = useState(() => isoDate(new Date()))
+  const [stockRefDocNo, setStockRefDocNo] = useState('')
+  const [stockRemarks, setStockRemarks] = useState('')
+  const [stockItemSearch, setStockItemSearch] = useState('')
+  const [draftStockItems, setDraftStockItems] = useState<DraftStockItem[]>([])
   const [rangePreset, setRangePreset] = useState<RangePreset>('today')
   const [customStart, setCustomStart] = useState(() => isoDate(new Date()))
   const [customEnd, setCustomEnd] = useState(() => isoDate(new Date()))
@@ -171,13 +196,128 @@ export function HavelockReportPage() {
 
   useEffect(() => {
     async function loadPrices() {
-      const { data } = await supabase.from('havelock_product_prices').select('product_name, price')
+      const { data } = await supabase
+        .from('havelock_product_prices')
+        .select('product_name, price, compare_at_price')
+        .order('product_name', { ascending: true })
+      const rows = (data ?? []) as PriceRow[]
       const map = new Map<string, number>()
-      for (const row of data ?? []) map.set(normalizeProductName(row.product_name), row.price)
+      for (const row of rows) map.set(normalizeProductName(row.product_name), row.price)
       setProductPrices(map)
+      setPriceRows(rows)
     }
     loadPrices()
   }, [])
+
+  const filteredPriceRows = useMemo(() => {
+    const q = priceSearch.trim().toLowerCase()
+    if (!q) return priceRows
+    return priceRows.filter((r) => r.product_name.toLowerCase().includes(q))
+  }, [priceRows, priceSearch])
+
+  async function loadStockEntries() {
+    setStockLoading(true)
+    setStockError(null)
+    const { data, error } = await supabase
+      .from('havelock_stock_entries')
+      .select('*, stock_entry_items:havelock_stock_entry_items(*)')
+      .order('entry_date', { ascending: false })
+      .order('created_at', { ascending: false })
+    if (error) setStockError(error.message)
+    else setStockEntries((data ?? []) as StockEntry[])
+    setStockLoading(false)
+  }
+
+  useEffect(() => {
+    loadStockEntries()
+  }, [])
+
+  const stockItemMatches = useMemo(() => {
+    const q = stockItemSearch.trim().toLowerCase()
+    if (!q) return []
+    return priceRows.filter((r) => r.product_name.toLowerCase().includes(q)).slice(0, 8)
+  }, [priceRows, stockItemSearch])
+
+  function addDraftStockItem(row: PriceRow) {
+    setDraftStockItems((prev) => {
+      if (prev.some((it) => it.productName === row.product_name)) return prev
+      return [...prev, { productName: row.product_name, quantity: 1, rate: row.price }]
+    })
+    setStockItemSearch('')
+  }
+
+  function updateDraftStockItem(index: number, patch: Partial<DraftStockItem>) {
+    setDraftStockItems((prev) => prev.map((it, i) => (i === index ? { ...it, ...patch } : it)))
+  }
+
+  function removeDraftStockItem(index: number) {
+    setDraftStockItems((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  function resetStockForm() {
+    setStockEntryDate(isoDate(new Date()))
+    setStockRefDocNo('')
+    setStockRemarks('')
+    setStockItemSearch('')
+    setDraftStockItems([])
+  }
+
+  async function handleConfirmStockEntry() {
+    if (draftStockItems.length === 0) return
+    setSavingStockEntry(true)
+    setStockError(null)
+    try {
+      const total = draftStockItems.reduce((s, it) => s + it.quantity * it.rate, 0)
+      const { data: entryRow, error: entryError } = await supabase
+        .from('havelock_stock_entries')
+        .insert({
+          entry_date: stockEntryDate,
+          ref_doc_no: stockRefDocNo || null,
+          remarks: stockRemarks || null,
+          total,
+        })
+        .select('id')
+        .single()
+      if (entryError) throw entryError
+
+      const { error: itemsError } = await supabase.from('havelock_stock_entry_items').insert(
+        draftStockItems.map((it) => ({
+          entry_id: entryRow.id,
+          product_name: it.productName,
+          quantity: it.quantity,
+          rate: it.rate,
+          total: it.quantity * it.rate,
+        })),
+      )
+      if (itemsError) throw itemsError
+
+      setShowStockForm(false)
+      resetStockForm()
+      await loadStockEntries()
+    } catch (err) {
+      setStockError(err instanceof Error ? err.message : 'Failed to save this stock entry.')
+    } finally {
+      setSavingStockEntry(false)
+    }
+  }
+
+  async function handleDeleteStockEntry(id: string) {
+    await supabase.from('havelock_stock_entries').delete().eq('id', id)
+    loadStockEntries()
+  }
+
+  function handleDownloadPrices() {
+    const headers = ['Product', 'Price', 'Compare At Price']
+    const csvRows = filteredPriceRows.map((r) => [r.product_name, r.price, r.compare_at_price ?? ''])
+    const csv = [headers, ...csvRows].map((row) => row.map(escapeCsv).join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'havelock-product-prices.csv'
+    link.click()
+    URL.revokeObjectURL(url)
+  }
 
   function currentPriceFor(productName: string): number | null {
     return productPrices.get(normalizeProductName(productName)) ?? null
@@ -310,7 +450,24 @@ export function HavelockReportPage() {
           <div className="r-sub">Ancient Nutra · Daily Report</div>
         </div>
         <div className="r-sec">Reports</div>
-        <button className="nav active">Daily Report</button>
+        <button
+          className={activeSection === 'report' ? 'nav active' : 'nav'}
+          onClick={() => setActiveSection('report')}
+        >
+          Daily Report
+        </button>
+        <button
+          className={activeSection === 'prices' ? 'nav active' : 'nav'}
+          onClick={() => setActiveSection('prices')}
+        >
+          Price List
+        </button>
+        <button
+          className={activeSection === 'stock' ? 'nav active' : 'nav'}
+          onClick={() => setActiveSection('stock')}
+        >
+          Stock Entries
+        </button>
         <div className="r-foot">
           <div className="r-av">AN</div>
           <div>
@@ -328,6 +485,287 @@ export function HavelockReportPage() {
       </aside>
 
       <main className="main">
+        {activeSection === 'stock' ? (
+          <>
+            <div className="topbar">
+              <div>
+                <h1>Physical Stock Entries</h1>
+                <div className="sub">{stockEntries.length} entries</div>
+              </div>
+              <div className="tools">
+                <button
+                  className="btn pri"
+                  onClick={() => {
+                    resetStockForm()
+                    setShowStockForm(true)
+                  }}
+                >
+                  + New Physical Stock Entry
+                </button>
+                <button className="btn ghost" onClick={handleSignOut}>
+                  Sign out
+                </button>
+              </div>
+            </div>
+
+            {stockError && <p className="error">{stockError}</p>}
+
+            {showStockForm && (
+              <div className="modal-backdrop">
+                <div className="modal-card" style={{ maxWidth: 960 }}>
+                  <h2>Create Physical Stock Entry</h2>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                    <div>
+                      <label className="fld">
+                        Entry Date
+                        <input
+                          className="input"
+                          type="date"
+                          value={stockEntryDate}
+                          onChange={(e) => setStockEntryDate(e.target.value)}
+                        />
+                      </label>
+                    </div>
+                    <div>
+                      <label className="fld">
+                        Ref Doc No
+                        <input
+                          className="input"
+                          value={stockRefDocNo}
+                          onChange={(e) => setStockRefDocNo(e.target.value)}
+                          placeholder="Optional"
+                        />
+                      </label>
+                    </div>
+                  </div>
+                  <label className="fld">
+                    Remarks
+                    <input
+                      className="input"
+                      value={stockRemarks}
+                      onChange={(e) => setStockRemarks(e.target.value)}
+                      placeholder="Optional"
+                    />
+                  </label>
+
+                  <div style={{ position: 'relative' }}>
+                    <label className="fld">
+                      Add item
+                      <input
+                        className="input"
+                        value={stockItemSearch}
+                        onChange={(e) => setStockItemSearch(e.target.value)}
+                        placeholder="Search products…"
+                      />
+                    </label>
+                    {stockItemMatches.length > 0 && (
+                      <div className="panel" style={{ position: 'absolute', zIndex: 5, width: '100%' }}>
+                        {stockItemMatches.map((row) => (
+                          <button
+                            key={row.product_name}
+                            className="btn ghost"
+                            style={{ display: 'flex', justifyContent: 'space-between', width: '100%', borderRadius: 0 }}
+                            onClick={() => addDraftStockItem(row)}
+                          >
+                            <span>{row.product_name}</span>
+                            <span>LKR {row.price.toLocaleString()}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="panel">
+                    <div className="tbl-wrap">
+                      <table className="tbl">
+                        <thead>
+                          <tr>
+                            <th>Item Name</th>
+                            <th>Qty</th>
+                            <th>Rate</th>
+                            <th>Total</th>
+                            <th></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {draftStockItems.length === 0 ? (
+                            <tr>
+                              <td colSpan={5} className="muted">
+                                No items added yet — search above to add one.
+                              </td>
+                            </tr>
+                          ) : (
+                            draftStockItems.map((it, idx) => (
+                              <tr key={it.productName}>
+                                <td className="wrap">{it.productName}</td>
+                                <td>
+                                  <input
+                                    className="input"
+                                    type="number"
+                                    min="0"
+                                    style={{ width: 80 }}
+                                    value={it.quantity}
+                                    onChange={(e) => updateDraftStockItem(idx, { quantity: Number(e.target.value) })}
+                                  />
+                                </td>
+                                <td>
+                                  <input
+                                    className="input"
+                                    type="number"
+                                    min="0"
+                                    style={{ width: 100 }}
+                                    value={it.rate}
+                                    onChange={(e) => updateDraftStockItem(idx, { rate: Number(e.target.value) })}
+                                  />
+                                </td>
+                                <td className="num">{(it.quantity * it.rate).toLocaleString()}</td>
+                                <td>
+                                  <button className="btn sm ghost" onClick={() => removeDraftStockItem(idx)}>
+                                    Remove
+                                  </button>
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  <div className="topbar" style={{ marginBottom: 0 }}>
+                    <div className="sub">
+                      Total: LKR{' '}
+                      {draftStockItems.reduce((s, it) => s + it.quantity * it.rate, 0).toLocaleString()}
+                    </div>
+                  </div>
+
+                  <div className="modal-actions">
+                    <button
+                      className="btn ghost"
+                      onClick={() => {
+                        setShowStockForm(false)
+                        resetStockForm()
+                      }}
+                      disabled={savingStockEntry}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      className="btn pri"
+                      onClick={handleConfirmStockEntry}
+                      disabled={savingStockEntry || draftStockItems.length === 0}
+                    >
+                      {savingStockEntry ? 'Saving…' : 'Confirm'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {stockLoading ? (
+              <p className="muted">Loading…</p>
+            ) : stockEntries.length === 0 ? (
+              <div className="empty">
+                <div className="e-icon">📋</div>
+                No stock entries yet. Click "New Physical Stock Entry" to get started.
+              </div>
+            ) : (
+              <div className="panel">
+                <div className="tbl-wrap">
+                  <table className="tbl">
+                    <thead>
+                      <tr>
+                        <th>Entry No</th>
+                        <th>Date</th>
+                        <th>Ref Doc No</th>
+                        <th>Remarks</th>
+                        <th>Items</th>
+                        <th>Total</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {stockEntries.map((entry) => (
+                        <tr key={entry.id}>
+                          <td>{entry.entry_no}</td>
+                          <td>{entry.entry_date}</td>
+                          <td>{entry.ref_doc_no}</td>
+                          <td className="wrap">{entry.remarks}</td>
+                          <td className="wrap">
+                            {entry.stock_entry_items
+                              .map((it) => `${it.quantity} ${it.product_name}`)
+                              .join(', ')}
+                          </td>
+                          <td className="num">LKR {entry.total.toLocaleString()}</td>
+                          <td>
+                            <button className="btn sm ghost" onClick={() => handleDeleteStockEntry(entry.id)}>
+                              Delete
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </>
+        ) : activeSection === 'prices' ? (
+          <>
+            <div className="topbar">
+              <div>
+                <h1>Product Price List</h1>
+                <div className="sub">
+                  {filteredPriceRows.length} of {priceRows.length} products · from Ancient Nutra website
+                </div>
+              </div>
+              <div className="tools">
+                <input
+                  className="input search-input"
+                  placeholder="Search products…"
+                  value={priceSearch}
+                  onChange={(e) => setPriceSearch(e.target.value)}
+                />
+                <button className="btn ghost" onClick={handleDownloadPrices} disabled={priceRows.length === 0}>
+                  Download
+                </button>
+              </div>
+            </div>
+
+            {priceRows.length === 0 ? (
+              <div className="empty">
+                <div className="e-icon">🏷️</div>
+                No prices loaded yet.
+              </div>
+            ) : (
+              <div className="panel">
+                <div className="tbl-wrap">
+                  <table className="tbl">
+                    <thead>
+                      <tr>
+                        <th>Product</th>
+                        <th>Price</th>
+                        <th>Compare-at Price</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredPriceRows.map((row) => (
+                        <tr key={row.product_name}>
+                          <td className="wrap">{row.product_name}</td>
+                          <td className="num">LKR {row.price.toLocaleString()}</td>
+                          <td className="num">
+                            {row.compare_at_price !== null ? `LKR ${row.compare_at_price.toLocaleString()}` : '—'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </>
+        ) : (
+          <>
         <div className="topbar">
           <div>
             <h1>Daily Bill Report</h1>
@@ -663,6 +1101,8 @@ export function HavelockReportPage() {
                 </table>
               </div>
             </div>
+          </>
+        )}
           </>
         )}
       </main>

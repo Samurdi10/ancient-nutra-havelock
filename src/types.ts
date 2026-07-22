@@ -52,3 +52,24 @@ export interface ParsedReport {
   }
   warnings: string[]
 }
+
+export interface StockEntryItem {
+  id: string
+  entry_id: string
+  product_name: string
+  quantity: number
+  rate: number
+  total: number
+}
+
+export interface StockEntry {
+  id: string
+  entry_no: string
+  entry_date: string
+  ref_doc_no: string | null
+  remarks: string | null
+  total: number
+  created_by_email: string | null
+  created_at: string
+  stock_entry_items: StockEntryItem[]
+}
