@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.110.1",
+    "exceljs": "^4.4.0",
     "pdfjs-dist": "^4.7.76",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
