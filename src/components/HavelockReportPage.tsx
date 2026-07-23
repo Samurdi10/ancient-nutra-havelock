@@ -150,6 +150,14 @@ export function HavelockReportPage() {
   const [activeSection, setActiveSection] = useState<'report' | 'prices' | 'stock'>('report')
   const [priceRows, setPriceRows] = useState<PriceRow[]>([])
   const [priceSearch, setPriceSearch] = useState('')
+  const [priceError, setPriceError] = useState<string | null>(null)
+  const [editingPriceProduct, setEditingPriceProduct] = useState<string | null>(null)
+  const [editPriceValue, setEditPriceValue] = useState('')
+  const [editCompareAtValue, setEditCompareAtValue] = useState('')
+  const [showAddProduct, setShowAddProduct] = useState(false)
+  const [newProductName, setNewProductName] = useState('')
+  const [newProductPrice, setNewProductPrice] = useState('')
+  const [newProductCompareAt, setNewProductCompareAt] = useState('')
   const [stockEntries, setStockEntries] = useState<StockEntry[]>([])
   const [stockLoading, setStockLoading] = useState(true)
   const [stockError, setStockError] = useState<string | null>(null)
@@ -200,18 +208,19 @@ export function HavelockReportPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [range.start, range.end])
 
+  async function loadPrices() {
+    const { data } = await supabase
+      .from('havelock_product_prices')
+      .select('product_name, price, compare_at_price')
+      .order('product_name', { ascending: true })
+    const rows = (data ?? []) as PriceRow[]
+    const map = new Map<string, number>()
+    for (const row of rows) map.set(normalizeProductName(row.product_name), row.price)
+    setProductPrices(map)
+    setPriceRows(rows)
+  }
+
   useEffect(() => {
-    async function loadPrices() {
-      const { data } = await supabase
-        .from('havelock_product_prices')
-        .select('product_name, price, compare_at_price')
-        .order('product_name', { ascending: true })
-      const rows = (data ?? []) as PriceRow[]
-      const map = new Map<string, number>()
-      for (const row of rows) map.set(normalizeProductName(row.product_name), row.price)
-      setProductPrices(map)
-      setPriceRows(rows)
-    }
     loadPrices()
   }, [])
 
@@ -220,6 +229,64 @@ export function HavelockReportPage() {
     if (!q) return priceRows
     return priceRows.filter((r) => r.product_name.toLowerCase().includes(q))
   }, [priceRows, priceSearch])
+
+  function startEditPrice(row: PriceRow) {
+    setEditingPriceProduct(row.product_name)
+    setEditPriceValue(String(row.price))
+    setEditCompareAtValue(row.compare_at_price !== null ? String(row.compare_at_price) : '')
+  }
+
+  function cancelEditPrice() {
+    setEditingPriceProduct(null)
+  }
+
+  async function saveEditPrice() {
+    if (!editingPriceProduct) return
+    setPriceError(null)
+    const price = Number(editPriceValue)
+    const compareAtPrice = editCompareAtValue.trim() ? Number(editCompareAtValue) : null
+    const { error } = await supabase
+      .from('havelock_product_prices')
+      .update({ price, compare_at_price: compareAtPrice })
+      .eq('product_name', editingPriceProduct)
+    if (error) {
+      setPriceError(error.message)
+      return
+    }
+    setEditingPriceProduct(null)
+    await loadPrices()
+  }
+
+  async function handleAddProduct() {
+    if (!newProductName.trim() || !newProductPrice.trim()) return
+    setPriceError(null)
+    const { error } = await supabase.from('havelock_product_prices').insert({
+      product_name: newProductName.trim(),
+      price: Number(newProductPrice),
+      compare_at_price: newProductCompareAt.trim() ? Number(newProductCompareAt) : null,
+    })
+    if (error) {
+      setPriceError(error.message)
+      return
+    }
+    setShowAddProduct(false)
+    setNewProductName('')
+    setNewProductPrice('')
+    setNewProductCompareAt('')
+    await loadPrices()
+  }
+
+  const currentStockByProduct = useMemo(() => {
+    const map = new Map<string, number>()
+    // stockEntries is sorted most-recent-first, so the first entry seen per
+    // product is its latest recorded physical count.
+    for (const entry of stockEntries) {
+      for (const item of entry.stock_entry_items) {
+        if (!map.has(item.product_name)) map.set(item.product_name, item.quantity)
+      }
+    }
+    return map
+  }, [stockEntries])
 
   async function loadStockEntries() {
     setStockLoading(true)
@@ -845,11 +912,72 @@ export function HavelockReportPage() {
                   value={priceSearch}
                   onChange={(e) => setPriceSearch(e.target.value)}
                 />
+                <button className="btn pri" onClick={() => setShowAddProduct(true)}>
+                  + Add product
+                </button>
                 <button className="btn ghost" onClick={handleDownloadPrices} disabled={priceRows.length === 0}>
                   Download
                 </button>
               </div>
             </div>
+
+            {priceError && <p className="error">{priceError}</p>}
+
+            {showAddProduct && (
+              <div className="modal-backdrop">
+                <div className="modal-card" style={{ maxWidth: 480 }}>
+                  <h2>Add product</h2>
+                  <label className="fld">
+                    Product name
+                    <input
+                      className="input"
+                      value={newProductName}
+                      onChange={(e) => setNewProductName(e.target.value)}
+                    />
+                  </label>
+                  <label className="fld">
+                    Price
+                    <input
+                      className="input"
+                      type="number"
+                      min="0"
+                      value={newProductPrice}
+                      onChange={(e) => setNewProductPrice(e.target.value)}
+                    />
+                  </label>
+                  <label className="fld">
+                    Compare-at price (optional)
+                    <input
+                      className="input"
+                      type="number"
+                      min="0"
+                      value={newProductCompareAt}
+                      onChange={(e) => setNewProductCompareAt(e.target.value)}
+                    />
+                  </label>
+                  <div className="modal-actions">
+                    <button
+                      className="btn ghost"
+                      onClick={() => {
+                        setShowAddProduct(false)
+                        setNewProductName('')
+                        setNewProductPrice('')
+                        setNewProductCompareAt('')
+                      }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      className="btn pri"
+                      onClick={handleAddProduct}
+                      disabled={!newProductName.trim() || !newProductPrice.trim()}
+                    >
+                      Add
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {priceRows.length === 0 ? (
               <div className="empty">
@@ -865,18 +993,71 @@ export function HavelockReportPage() {
                         <th>Product</th>
                         <th>Price</th>
                         <th>Compare-at Price</th>
+                        <th>Current Stock</th>
+                        <th></th>
                       </tr>
                     </thead>
                     <tbody>
-                      {filteredPriceRows.map((row) => (
-                        <tr key={row.product_name}>
-                          <td className="wrap">{row.product_name}</td>
-                          <td className="num">LKR {row.price.toLocaleString()}</td>
-                          <td className="num">
-                            {row.compare_at_price !== null ? `LKR ${row.compare_at_price.toLocaleString()}` : '—'}
-                          </td>
-                        </tr>
-                      ))}
+                      {filteredPriceRows.map((row) => {
+                        const isEditing = editingPriceProduct === row.product_name
+                        const stock = currentStockByProduct.get(row.product_name)
+                        return (
+                          <tr key={row.product_name}>
+                            <td className="wrap">{row.product_name}</td>
+                            {isEditing ? (
+                              <>
+                                <td>
+                                  <input
+                                    className="input"
+                                    type="number"
+                                    min="0"
+                                    style={{ width: 110 }}
+                                    value={editPriceValue}
+                                    onChange={(e) => setEditPriceValue(e.target.value)}
+                                  />
+                                </td>
+                                <td>
+                                  <input
+                                    className="input"
+                                    type="number"
+                                    min="0"
+                                    style={{ width: 110 }}
+                                    value={editCompareAtValue}
+                                    onChange={(e) => setEditCompareAtValue(e.target.value)}
+                                    placeholder="Optional"
+                                  />
+                                </td>
+                              </>
+                            ) : (
+                              <>
+                                <td className="num">LKR {row.price.toLocaleString()}</td>
+                                <td className="num">
+                                  {row.compare_at_price !== null
+                                    ? `LKR ${row.compare_at_price.toLocaleString()}`
+                                    : '—'}
+                                </td>
+                              </>
+                            )}
+                            <td className="num">{stock !== undefined ? stock.toLocaleString() : '—'}</td>
+                            <td>
+                              {isEditing ? (
+                                <div className="row-actions">
+                                  <button className="btn sm pri" onClick={saveEditPrice}>
+                                    Save
+                                  </button>
+                                  <button className="btn sm ghost" onClick={cancelEditPrice}>
+                                    Cancel
+                                  </button>
+                                </div>
+                              ) : (
+                                <button className="btn sm ghost" onClick={() => startEditPrice(row)}>
+                                  Edit
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        )
+                      })}
                     </tbody>
                   </table>
                 </div>
