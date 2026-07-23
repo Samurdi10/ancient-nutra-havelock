@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { parseHavelockReportPdf } from '../lib/parseHavelockReport'
 import { parseStockBulkUpload } from '../lib/parseStockBulkUpload'
-import type { Bill, ParsedReport, StockEntry, PurchaseOrder } from '../types'
+import type { Bill, ParsedReport, StockEntry, PurchaseOrder, AttendanceLog } from '../types'
 
 type RangePreset = 'today' | 'yesterday' | 'last7' | 'thismonth' | 'custom'
 
@@ -71,6 +71,19 @@ function hourLabel(h: number): string {
 function escapeCsv(value: unknown): string {
   const s = String(value ?? '')
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+}
+
+function formatClockTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+}
+
+function formatDuration(timeIn: string, timeOut: string | null): string {
+  if (!timeOut) return 'In progress'
+  const ms = new Date(timeOut).getTime() - new Date(timeIn).getTime()
+  const totalMinutes = Math.max(0, Math.round(ms / 60000))
+  const hours = Math.floor(totalMinutes / 60)
+  const minutes = totalMinutes % 60
+  return `${hours}h ${minutes}m`
 }
 
 function downloadCsv(bills: Bill[], fileName: string) {
@@ -164,7 +177,7 @@ function computePoItemTotals(item: DraftPoItem): { netTotal: number; total: numb
 
 export function HavelockReportPage() {
   const [theme, setTheme] = useState<string>(currentTheme())
-  const [activeSection, setActiveSection] = useState<'report' | 'prices' | 'stock' | 'po'>('report')
+  const [activeSection, setActiveSection] = useState<'report' | 'prices' | 'stock' | 'po' | 'attendance'>('report')
   const [priceRows, setPriceRows] = useState<PriceRow[]>([])
   const [priceSearch, setPriceSearch] = useState('')
   const [priceError, setPriceError] = useState<string | null>(null)
@@ -202,6 +215,11 @@ export function HavelockReportPage() {
   const [poRemarks, setPoRemarks] = useState('')
   const [poItemSearch, setPoItemSearch] = useState('')
   const [draftPoItems, setDraftPoItems] = useState<DraftPoItem[]>([])
+  const [attendanceLogs, setAttendanceLogs] = useState<AttendanceLog[]>([])
+  const [attendanceLoading, setAttendanceLoading] = useState(true)
+  const [attendanceError, setAttendanceError] = useState<string | null>(null)
+  const [clockInName, setClockInName] = useState('')
+  const [clockInPlace, setClockInPlace] = useState('Havelock City Mall')
   const [rangePreset, setRangePreset] = useState<RangePreset>('today')
   const [customStart, setCustomStart] = useState(() => isoDate(new Date()))
   const [customEnd, setCustomEnd] = useState(() => isoDate(new Date()))
@@ -589,6 +607,54 @@ export function HavelockReportPage() {
     loadPurchaseOrders()
   }
 
+  async function loadAttendanceLogs() {
+    setAttendanceLoading(true)
+    setAttendanceError(null)
+    const { data, error } = await supabase
+      .from('havelock_attendance_logs')
+      .select('*')
+      .order('time_in', { ascending: false })
+    if (error) setAttendanceError(error.message)
+    else setAttendanceLogs((data ?? []) as AttendanceLog[])
+    setAttendanceLoading(false)
+  }
+
+  useEffect(() => {
+    loadAttendanceLogs()
+  }, [])
+
+  async function handleClockIn() {
+    if (!clockInName.trim()) return
+    setAttendanceError(null)
+    const { error } = await supabase.from('havelock_attendance_logs').insert({
+      staff_name: clockInName.trim(),
+      place: clockInPlace.trim() || 'Havelock City Mall',
+    })
+    if (error) {
+      setAttendanceError(error.message)
+      return
+    }
+    setClockInName('')
+    await loadAttendanceLogs()
+  }
+
+  async function handleClockOut(id: string) {
+    setAttendanceError(null)
+    const { error } = await supabase
+      .from('havelock_attendance_logs')
+      .update({ time_out: new Date().toISOString() })
+      .eq('id', id)
+    if (error) setAttendanceError(error.message)
+    else await loadAttendanceLogs()
+  }
+
+  async function handleDeleteAttendance(id: string) {
+    await supabase.from('havelock_attendance_logs').delete().eq('id', id)
+    loadAttendanceLogs()
+  }
+
+  const openAttendanceLogs = useMemo(() => attendanceLogs.filter((l) => l.time_out === null), [attendanceLogs])
+
   function handleDownloadPrices() {
     const headers = ['Product', 'Price', 'Compare At Price']
     const csvRows = filteredPriceRows.map((r) => [r.product_name, r.price, r.compare_at_price ?? ''])
@@ -757,6 +823,12 @@ export function HavelockReportPage() {
         >
           Purchase Orders
         </button>
+        <button
+          className={activeSection === 'attendance' ? 'nav active' : 'nav'}
+          onClick={() => setActiveSection('attendance')}
+        >
+          Attendance
+        </button>
         <div className="r-foot">
           <div className="r-av">AN</div>
           <div>
@@ -774,7 +846,121 @@ export function HavelockReportPage() {
       </aside>
 
       <main className="main">
-        {activeSection === 'po' ? (
+        {activeSection === 'attendance' ? (
+          <>
+            <div className="topbar">
+              <div>
+                <h1>Attendance Log</h1>
+                <div className="sub">
+                  {openAttendanceLogs.length} currently clocked in · {attendanceLogs.length} total records
+                </div>
+              </div>
+              <div className="tools">
+                <button className="btn ghost" onClick={handleSignOut}>
+                  Sign out
+                </button>
+              </div>
+            </div>
+
+            {attendanceError && <p className="error">{attendanceError}</p>}
+
+            <div className="panel" style={{ padding: 16, marginBottom: 16 }}>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                <label className="fld" style={{ flex: 1, minWidth: 180 }}>
+                  Name
+                  <input
+                    className="input"
+                    value={clockInName}
+                    onChange={(e) => setClockInName(e.target.value)}
+                    placeholder="Staff name"
+                  />
+                </label>
+                <label className="fld" style={{ flex: 1, minWidth: 180 }}>
+                  Place
+                  <input className="input" value={clockInPlace} onChange={(e) => setClockInPlace(e.target.value)} />
+                </label>
+                <button className="btn pri" onClick={handleClockIn} disabled={!clockInName.trim()}>
+                  Clock In
+                </button>
+              </div>
+            </div>
+
+            {openAttendanceLogs.length > 0 && (
+              <div className="panel" style={{ marginBottom: 16 }}>
+                <div className="tbl-wrap">
+                  <table className="tbl">
+                    <thead>
+                      <tr>
+                        <th>Name</th>
+                        <th>Place</th>
+                        <th>Time In</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {openAttendanceLogs.map((log) => (
+                        <tr key={log.id}>
+                          <td>{log.staff_name}</td>
+                          <td>{log.place}</td>
+                          <td>{formatClockTime(log.time_in)}</td>
+                          <td>
+                            <button className="btn sm pri" onClick={() => handleClockOut(log.id)}>
+                              Clock Out
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {attendanceLoading ? (
+              <p className="muted">Loading…</p>
+            ) : attendanceLogs.length === 0 ? (
+              <div className="empty">
+                <div className="e-icon">🕒</div>
+                No attendance records yet. Clock in above to get started.
+              </div>
+            ) : (
+              <div className="panel">
+                <div className="tbl-wrap">
+                  <table className="tbl">
+                    <thead>
+                      <tr>
+                        <th>Name</th>
+                        <th>Place</th>
+                        <th>Date</th>
+                        <th>Time In</th>
+                        <th>Time Out</th>
+                        <th>Duration</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {attendanceLogs.map((log) => (
+                        <tr key={log.id}>
+                          <td>{log.staff_name}</td>
+                          <td>{log.place}</td>
+                          <td>{log.log_date}</td>
+                          <td>{formatClockTime(log.time_in)}</td>
+                          <td>{log.time_out ? formatClockTime(log.time_out) : '—'}</td>
+                          <td>{formatDuration(log.time_in, log.time_out)}</td>
+                          <td>
+                            <button className="btn sm ghost" onClick={() => handleDeleteAttendance(log.id)}>
+                              Delete
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </>
+        ) : activeSection === 'po' ? (
           <>
             <div className="topbar">
               <div>

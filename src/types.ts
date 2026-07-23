@@ -112,3 +112,14 @@ export interface PurchaseOrder {
   created_at: string
   purchase_order_items: PurchaseOrderItem[]
 }
+
+export interface AttendanceLog {
+  id: string
+  staff_name: string
+  place: string
+  log_date: string
+  time_in: string
+  time_out: string | null
+  created_by_email: string | null
+  created_at: string
+}
