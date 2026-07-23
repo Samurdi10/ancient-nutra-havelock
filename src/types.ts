@@ -75,3 +75,40 @@ export interface StockEntry {
   created_at: string
   stock_entry_items: StockEntryItem[]
 }
+
+export type PoStatus = 'Pending' | 'Approved' | 'Rejected' | 'Completed'
+
+export interface PurchaseOrderItem {
+  id: string
+  po_id: string
+  item_code: string | null
+  product_name: string
+  rate: number
+  quantity: number
+  unit: string
+  net_total: number
+  discount_value: number
+  tax_amount: number
+  tax_combination: string
+  total: number
+}
+
+export interface PurchaseOrder {
+  id: string
+  po_no: string
+  po_date: string
+  ref_doc_no: string | null
+  from_location: string
+  to_location: string
+  supplier_name: string | null
+  supplier_reg_no: string | null
+  status: PoStatus
+  remarks: string | null
+  net_total: number
+  total_discount: number
+  total_tax: number
+  total: number
+  created_by_email: string | null
+  created_at: string
+  purchase_order_items: PurchaseOrderItem[]
+}

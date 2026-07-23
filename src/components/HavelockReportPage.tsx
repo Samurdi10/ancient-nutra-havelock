@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { parseHavelockReportPdf } from '../lib/parseHavelockReport'
 import { parseStockBulkUpload } from '../lib/parseStockBulkUpload'
-import type { Bill, ParsedReport, StockEntry } from '../types'
+import type { Bill, ParsedReport, StockEntry, PurchaseOrder } from '../types'
 
 type RangePreset = 'today' | 'yesterday' | 'last7' | 'thismonth' | 'custom'
 
@@ -145,9 +145,26 @@ interface DraftStockItem {
   expiryDate: string | null
 }
 
+interface DraftPoItem {
+  itemCode: string | null
+  productName: string
+  rate: number
+  quantity: number
+  unit: string
+  discountValue: number
+  taxAmount: number
+  taxCombination: string
+}
+
+function computePoItemTotals(item: DraftPoItem): { netTotal: number; total: number } {
+  const netTotal = item.rate * item.quantity
+  const total = netTotal - item.discountValue + item.taxAmount
+  return { netTotal, total }
+}
+
 export function HavelockReportPage() {
   const [theme, setTheme] = useState<string>(currentTheme())
-  const [activeSection, setActiveSection] = useState<'report' | 'prices' | 'stock'>('report')
+  const [activeSection, setActiveSection] = useState<'report' | 'prices' | 'stock' | 'po'>('report')
   const [priceRows, setPriceRows] = useState<PriceRow[]>([])
   const [priceSearch, setPriceSearch] = useState('')
   const [priceError, setPriceError] = useState<string | null>(null)
@@ -171,6 +188,20 @@ export function HavelockReportPage() {
   const [bulkUploading, setBulkUploading] = useState(false)
   const [bulkWarnings, setBulkWarnings] = useState<string[]>([])
   const bulkFileInputRef = useRef<HTMLInputElement>(null)
+  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([])
+  const [poLoading, setPoLoading] = useState(true)
+  const [poError, setPoError] = useState<string | null>(null)
+  const [showPoForm, setShowPoForm] = useState(false)
+  const [savingPo, setSavingPo] = useState(false)
+  const [poDate, setPoDate] = useState(() => isoDate(new Date()))
+  const [poRefDocNo, setPoRefDocNo] = useState('')
+  const [poFromLocation, setPoFromLocation] = useState('Ancient Nutra - Havelock City Mall')
+  const [poToLocation, setPoToLocation] = useState('Ancient Nutra - Havelock City Mall')
+  const [poSupplierName, setPoSupplierName] = useState('')
+  const [poSupplierRegNo, setPoSupplierRegNo] = useState('')
+  const [poRemarks, setPoRemarks] = useState('')
+  const [poItemSearch, setPoItemSearch] = useState('')
+  const [draftPoItems, setDraftPoItems] = useState<DraftPoItem[]>([])
   const [rangePreset, setRangePreset] = useState<RangePreset>('today')
   const [customStart, setCustomStart] = useState(() => isoDate(new Date()))
   const [customEnd, setCustomEnd] = useState(() => isoDate(new Date()))
@@ -428,6 +459,136 @@ export function HavelockReportPage() {
     loadStockEntries()
   }
 
+  async function loadPurchaseOrders() {
+    setPoLoading(true)
+    setPoError(null)
+    const { data, error } = await supabase
+      .from('havelock_purchase_orders')
+      .select('*, purchase_order_items:havelock_purchase_order_items(*)')
+      .order('po_date', { ascending: false })
+      .order('created_at', { ascending: false })
+    if (error) setPoError(error.message)
+    else setPurchaseOrders((data ?? []) as PurchaseOrder[])
+    setPoLoading(false)
+  }
+
+  useEffect(() => {
+    loadPurchaseOrders()
+  }, [])
+
+  const poItemMatches = useMemo(() => {
+    const q = poItemSearch.trim().toLowerCase()
+    if (!q) return []
+    return priceRows.filter((r) => r.product_name.toLowerCase().includes(q)).slice(0, 8)
+  }, [priceRows, poItemSearch])
+
+  function addDraftPoItem(row: PriceRow) {
+    setDraftPoItems((prev) => {
+      if (prev.some((it) => it.productName === row.product_name)) return prev
+      return [
+        ...prev,
+        {
+          itemCode: null,
+          productName: row.product_name,
+          rate: 0,
+          quantity: 1,
+          unit: 'Numbers',
+          discountValue: 0,
+          taxAmount: 0,
+          taxCombination: 'VAT',
+        },
+      ]
+    })
+    setPoItemSearch('')
+  }
+
+  function updateDraftPoItem(index: number, patch: Partial<DraftPoItem>) {
+    setDraftPoItems((prev) => prev.map((it, i) => (i === index ? { ...it, ...patch } : it)))
+  }
+
+  function removeDraftPoItem(index: number) {
+    setDraftPoItems((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  function resetPoForm() {
+    setPoDate(isoDate(new Date()))
+    setPoRefDocNo('')
+    setPoFromLocation('Ancient Nutra - Havelock City Mall')
+    setPoToLocation('Ancient Nutra - Havelock City Mall')
+    setPoSupplierName('')
+    setPoSupplierRegNo('')
+    setPoRemarks('')
+    setPoItemSearch('')
+    setDraftPoItems([])
+  }
+
+  async function handleConfirmPo() {
+    if (draftPoItems.length === 0) return
+    setSavingPo(true)
+    setPoError(null)
+    try {
+      const totals = draftPoItems.map(computePoItemTotals)
+      const netTotal = totals.reduce((s, t) => s + t.netTotal, 0)
+      const totalDiscount = draftPoItems.reduce((s, it) => s + it.discountValue, 0)
+      const totalTax = draftPoItems.reduce((s, it) => s + it.taxAmount, 0)
+      const total = totals.reduce((s, t) => s + t.total, 0)
+
+      const { data: poRow, error: poInsertError } = await supabase
+        .from('havelock_purchase_orders')
+        .insert({
+          po_date: poDate,
+          ref_doc_no: poRefDocNo || null,
+          from_location: poFromLocation,
+          to_location: poToLocation,
+          supplier_name: poSupplierName || null,
+          supplier_reg_no: poSupplierRegNo || null,
+          remarks: poRemarks || null,
+          net_total: netTotal,
+          total_discount: totalDiscount,
+          total_tax: totalTax,
+          total,
+        })
+        .select('id')
+        .single()
+      if (poInsertError) throw poInsertError
+
+      const { error: itemsError } = await supabase.from('havelock_purchase_order_items').insert(
+        draftPoItems.map((it, i) => ({
+          po_id: poRow.id,
+          item_code: it.itemCode,
+          product_name: it.productName,
+          rate: it.rate,
+          quantity: it.quantity,
+          unit: it.unit,
+          net_total: totals[i].netTotal,
+          discount_value: it.discountValue,
+          tax_amount: it.taxAmount,
+          tax_combination: it.taxCombination,
+          total: totals[i].total,
+        })),
+      )
+      if (itemsError) throw itemsError
+
+      setShowPoForm(false)
+      resetPoForm()
+      await loadPurchaseOrders()
+    } catch (err) {
+      setPoError(err instanceof Error ? err.message : 'Failed to save this purchase order.')
+    } finally {
+      setSavingPo(false)
+    }
+  }
+
+  async function handleDeletePo(id: string) {
+    await supabase.from('havelock_purchase_orders').delete().eq('id', id)
+    loadPurchaseOrders()
+  }
+
+  async function handleUpdatePoStatus(id: string, status: PurchaseOrder['status']) {
+    await supabase.from('havelock_purchase_orders').update({ status }).eq('id', id)
+    loadPurchaseOrders()
+  }
+
   function handleDownloadPrices() {
     const headers = ['Product', 'Price', 'Compare At Price']
     const csvRows = filteredPriceRows.map((r) => [r.product_name, r.price, r.compare_at_price ?? ''])
@@ -590,6 +751,12 @@ export function HavelockReportPage() {
         >
           Stock Entries
         </button>
+        <button
+          className={activeSection === 'po' ? 'nav active' : 'nav'}
+          onClick={() => setActiveSection('po')}
+        >
+          Purchase Orders
+        </button>
         <div className="r-foot">
           <div className="r-av">AN</div>
           <div>
@@ -607,7 +774,301 @@ export function HavelockReportPage() {
       </aside>
 
       <main className="main">
-        {activeSection === 'stock' ? (
+        {activeSection === 'po' ? (
+          <>
+            <div className="topbar">
+              <div>
+                <h1>Purchase Orders</h1>
+                <div className="sub">{purchaseOrders.length} purchase orders</div>
+              </div>
+              <div className="tools">
+                <button
+                  className="btn pri"
+                  onClick={() => {
+                    resetPoForm()
+                    setShowPoForm(true)
+                  }}
+                >
+                  + Request PO
+                </button>
+                <button className="btn ghost" onClick={handleSignOut}>
+                  Sign out
+                </button>
+              </div>
+            </div>
+
+            {poError && <p className="error">{poError}</p>}
+
+            {showPoForm && (
+              <div className="modal-backdrop">
+                <div className="modal-card" style={{ maxWidth: 1000 }}>
+                  <h2>Request Purchase Order</h2>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                    <label className="fld">
+                      PO Date
+                      <input className="input" type="date" value={poDate} onChange={(e) => setPoDate(e.target.value)} />
+                    </label>
+                    <label className="fld">
+                      Ref Doc No
+                      <input
+                        className="input"
+                        value={poRefDocNo}
+                        onChange={(e) => setPoRefDocNo(e.target.value)}
+                        placeholder="Optional"
+                      />
+                    </label>
+                    <label className="fld">
+                      From (Location)
+                      <input
+                        className="input"
+                        value={poFromLocation}
+                        onChange={(e) => setPoFromLocation(e.target.value)}
+                      />
+                    </label>
+                    <label className="fld">
+                      To (Location)
+                      <input className="input" value={poToLocation} onChange={(e) => setPoToLocation(e.target.value)} />
+                    </label>
+                    <label className="fld">
+                      Supplier name
+                      <input
+                        className="input"
+                        value={poSupplierName}
+                        onChange={(e) => setPoSupplierName(e.target.value)}
+                        placeholder="e.g. Main Warehouse"
+                      />
+                    </label>
+                    <label className="fld">
+                      Supplier Reg No
+                      <input
+                        className="input"
+                        value={poSupplierRegNo}
+                        onChange={(e) => setPoSupplierRegNo(e.target.value)}
+                        placeholder="Optional"
+                      />
+                    </label>
+                  </div>
+                  <label className="fld">
+                    Remarks
+                    <input className="input" value={poRemarks} onChange={(e) => setPoRemarks(e.target.value)} placeholder="Optional" />
+                  </label>
+
+                  <div style={{ position: 'relative' }}>
+                    <label className="fld">
+                      Add item
+                      <input
+                        className="input"
+                        value={poItemSearch}
+                        onChange={(e) => setPoItemSearch(e.target.value)}
+                        placeholder="Search products…"
+                      />
+                    </label>
+                    {poItemMatches.length > 0 && (
+                      <div className="panel" style={{ position: 'absolute', zIndex: 5, width: '100%' }}>
+                        {poItemMatches.map((row) => (
+                          <button
+                            key={row.product_name}
+                            className="btn ghost"
+                            style={{ display: 'flex', justifyContent: 'space-between', width: '100%', borderRadius: 0 }}
+                            onClick={() => addDraftPoItem(row)}
+                          >
+                            <span>{row.product_name}</span>
+                            <span>LKR {row.price.toLocaleString()}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="panel">
+                    <div className="tbl-wrap">
+                      <table className="tbl">
+                        <thead>
+                          <tr>
+                            <th>Item Code</th>
+                            <th>Item Name</th>
+                            <th>Rate</th>
+                            <th>Qty</th>
+                            <th>Unit</th>
+                            <th>Discount</th>
+                            <th>Tax Amount</th>
+                            <th>Net Total</th>
+                            <th>Total</th>
+                            <th></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {draftPoItems.length === 0 ? (
+                            <tr>
+                              <td colSpan={10} className="muted">
+                                No items added yet — search above to add one.
+                              </td>
+                            </tr>
+                          ) : (
+                            draftPoItems.map((it, idx) => {
+                              const { netTotal, total } = computePoItemTotals(it)
+                              return (
+                                <tr key={it.productName}>
+                                  <td>
+                                    <input
+                                      className="input"
+                                      style={{ width: 90 }}
+                                      value={it.itemCode ?? ''}
+                                      onChange={(e) => updateDraftPoItem(idx, { itemCode: e.target.value || null })}
+                                    />
+                                  </td>
+                                  <td className="wrap">{it.productName}</td>
+                                  <td>
+                                    <input
+                                      className="input"
+                                      type="number"
+                                      min="0"
+                                      style={{ width: 90 }}
+                                      value={it.rate}
+                                      onChange={(e) => updateDraftPoItem(idx, { rate: Number(e.target.value) })}
+                                    />
+                                  </td>
+                                  <td>
+                                    <input
+                                      className="input"
+                                      type="number"
+                                      min="0"
+                                      style={{ width: 80 }}
+                                      value={it.quantity}
+                                      onChange={(e) => updateDraftPoItem(idx, { quantity: Number(e.target.value) })}
+                                    />
+                                  </td>
+                                  <td>
+                                    <input
+                                      className="input"
+                                      style={{ width: 90 }}
+                                      value={it.unit}
+                                      onChange={(e) => updateDraftPoItem(idx, { unit: e.target.value })}
+                                    />
+                                  </td>
+                                  <td>
+                                    <input
+                                      className="input"
+                                      type="number"
+                                      min="0"
+                                      style={{ width: 90 }}
+                                      value={it.discountValue}
+                                      onChange={(e) => updateDraftPoItem(idx, { discountValue: Number(e.target.value) })}
+                                    />
+                                  </td>
+                                  <td>
+                                    <input
+                                      className="input"
+                                      type="number"
+                                      min="0"
+                                      style={{ width: 90 }}
+                                      value={it.taxAmount}
+                                      onChange={(e) => updateDraftPoItem(idx, { taxAmount: Number(e.target.value) })}
+                                    />
+                                  </td>
+                                  <td className="num">{netTotal.toLocaleString()}</td>
+                                  <td className="num">{total.toLocaleString()}</td>
+                                  <td>
+                                    <button className="btn sm ghost" onClick={() => removeDraftPoItem(idx)}>
+                                      Remove
+                                    </button>
+                                  </td>
+                                </tr>
+                              )
+                            })
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  <div className="topbar" style={{ marginBottom: 0 }}>
+                    <div className="sub">
+                      Total: LKR{' '}
+                      {draftPoItems.reduce((s, it) => s + computePoItemTotals(it).total, 0).toLocaleString()}
+                    </div>
+                  </div>
+
+                  <div className="modal-actions">
+                    <button
+                      className="btn ghost"
+                      onClick={() => {
+                        setShowPoForm(false)
+                        resetPoForm()
+                      }}
+                      disabled={savingPo}
+                    >
+                      Cancel
+                    </button>
+                    <button className="btn pri" onClick={handleConfirmPo} disabled={savingPo || draftPoItems.length === 0}>
+                      {savingPo ? 'Saving…' : 'Confirm'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {poLoading ? (
+              <p className="muted">Loading…</p>
+            ) : purchaseOrders.length === 0 ? (
+              <div className="empty">
+                <div className="e-icon">📦</div>
+                No purchase orders yet. Click "+ Request PO" to get started.
+              </div>
+            ) : (
+              <div className="panel">
+                <div className="tbl-wrap">
+                  <table className="tbl">
+                    <thead>
+                      <tr>
+                        <th>PO No</th>
+                        <th>Date</th>
+                        <th>Supplier</th>
+                        <th>Items</th>
+                        <th>Total</th>
+                        <th>Status</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {purchaseOrders.map((po) => (
+                        <tr key={po.id}>
+                          <td>{po.po_no}</td>
+                          <td>{po.po_date}</td>
+                          <td>{po.supplier_name}</td>
+                          <td className="wrap">
+                            {po.purchase_order_items
+                              .map((it) => `${it.quantity} ${it.unit} ${it.product_name}`)
+                              .join(', ')}
+                          </td>
+                          <td className="num">LKR {po.total.toLocaleString()}</td>
+                          <td>
+                            <select
+                              className="input"
+                              style={{ width: 'auto' }}
+                              value={po.status}
+                              onChange={(e) => handleUpdatePoStatus(po.id, e.target.value as PurchaseOrder['status'])}
+                            >
+                              <option value="Pending">Pending</option>
+                              <option value="Approved">Approved</option>
+                              <option value="Rejected">Rejected</option>
+                              <option value="Completed">Completed</option>
+                            </select>
+                          </td>
+                          <td>
+                            <button className="btn sm ghost" onClick={() => handleDeletePo(po.id)}>
+                              Delete
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </>
+        ) : activeSection === 'stock' ? (
           <>
             <div className="topbar">
               <div>
