@@ -1,0 +1,116 @@
+// Pushes one daily bill (havelock_bills + havelock_bill_items) to QuickBooks
+// Online as a Sales Receipt, which auto-decrements QBO Inventory on hand for
+// every mapped line item. Call with { billId }.
+//
+// Products with no row in havelock_qbo_item_map are skipped (not failed) and
+// listed back in the response as `unmappedProducts`, mirroring the warning
+// style already used for PDF-parsing and price-list mismatches in this app.
+//
+// Env (Supabase function secrets):
+//   QBO_DEFAULT_CUSTOMER_ID — QBO requires a CustomerRef on every Sales
+//     Receipt; create a single "Walk-in Customer" in QBO once and put its Id
+//     here (retail POS sales aren't tied to a real customer record).
+
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import {
+  CORS_HEADERS,
+  jsonResponse,
+  getValidConnection,
+  postQboEntity,
+  findQboItemRef,
+  logSyncResult,
+} from '../_shared/qbo-client.ts'
+
+interface BillItemRow {
+  product_name: string
+  quantity: number
+  net_total: number
+}
+
+interface BillRow {
+  id: string
+  report_date: string
+  invoice_number: string
+  net_total: number
+  havelock_bill_items: BillItemRow[]
+}
+
+Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') return new Response(null, { headers: CORS_HEADERS })
+  if (req.method !== 'POST') return jsonResponse({ error: 'method not allowed' }, 405)
+
+  const customerId = Deno.env.get('QBO_DEFAULT_CUSTOMER_ID')
+  if (!customerId) return jsonResponse({ error: 'QBO_DEFAULT_CUSTOMER_ID is not configured' }, 500)
+
+  let billId: string | undefined
+  try {
+    billId = (await req.json())?.billId
+  } catch {
+    return jsonResponse({ error: 'bad request' }, 400)
+  }
+  if (!billId) return jsonResponse({ error: 'billId is required' }, 400)
+
+  const supabase = createClient(
+    Deno.env.get('SUPABASE_URL')!,
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+    { auth: { persistSession: false } },
+  )
+
+  // Idempotent: a bill already pushed successfully just returns its QBO id again.
+  const { data: existing } = await supabase
+    .from('havelock_qbo_sync_log')
+    .select('qbo_id')
+    .eq('record_type', 'bill')
+    .eq('record_id', billId)
+    .eq('status', 'success')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (existing?.qbo_id) return jsonResponse({ qboId: existing.qbo_id, alreadySynced: true })
+
+  const { data: bill, error: billError } = await supabase
+    .from('havelock_bills')
+    .select('id, report_date, invoice_number, net_total, havelock_bill_items(product_name, quantity, net_total)')
+    .eq('id', billId)
+    .maybeSingle<BillRow>()
+  if (billError || !bill) return jsonResponse({ error: 'bill not found' }, 404)
+
+  const unmappedProducts: string[] = []
+  const lines: Record<string, unknown>[] = []
+  for (const item of bill.havelock_bill_items) {
+    const itemRef = await findQboItemRef(supabase, item.product_name)
+    if (!itemRef) {
+      unmappedProducts.push(item.product_name)
+      continue
+    }
+    lines.push({
+      Amount: item.net_total,
+      DetailType: 'SalesItemLineDetail',
+      SalesItemLineDetail: { ItemRef: { value: itemRef.value, name: itemRef.name }, Qty: item.quantity },
+    })
+  }
+
+  if (lines.length === 0) {
+    return jsonResponse(
+      { error: 'No line items are mapped to a QBO item yet.', unmappedProducts },
+      422,
+    )
+  }
+
+  try {
+    const conn = await getValidConnection(supabase)
+    const receipt = await postQboEntity(conn, 'salesreceipt', {
+      TxnDate: bill.report_date,
+      DocNumber: bill.invoice_number,
+      CustomerRef: { value: customerId },
+      Line: lines,
+    })
+    const qboId = (receipt as { SalesReceipt?: { Id?: string } }).SalesReceipt?.Id
+    await logSyncResult(supabase, { recordType: 'bill', recordId: billId, status: 'success', qboId })
+    return jsonResponse({ qboId, unmappedProducts })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    await logSyncResult(supabase, { recordType: 'bill', recordId: billId, status: 'error', error: message })
+    return jsonResponse({ error: message, unmappedProducts }, 502)
+  }
+})
