@@ -139,6 +139,79 @@ This repo only covers the app side of SSO. Someone with access to the SPINE
 repo still needs to register a new tile/surface `module_havelock` pointing at
 this app's deployed URL — that's a separate repo, not part of this project.
 
+## QuickBooks Online
+
+The **QuickBooks** tab connects this app to QuickBooks Online (QBO) so daily
+sales, physical stock entries, and completed purchase orders can be pushed
+there as Sales Receipts / Inventory Adjustments / Bills — QBO's Inventory then
+becomes the system of record for stock on hand at Havelock City Mall. Sync is
+manual per record ("Push to QuickBooks" buttons), not automatic, so a bad push
+is reviewable before it lands in the accounting system.
+
+**Requires QuickBooks Online Plus or Advanced** — Simple Start/Essentials have
+no Inventory tracking. Confirm this (and that your QBO company is usable from
+your region) before setting the rest of this up.
+
+### 1. Register an Intuit Developer app
+
+1. Create an app at the [Intuit Developer portal](https://developer.intuit.com)
+   with the `com.intuit.quickbooks.accounting` scope. Start in **Sandbox**.
+2. Add `https://<your-site>.netlify.app/` (and `http://localhost:5173/` for
+   local dev) as a **Redirect URI**.
+3. Note the **Client ID** and **Client Secret**.
+
+### 2. Configure secrets and env vars
+
+Supabase function secrets (`Project Settings → Edge Functions → Secrets`, or
+`supabase secrets set`) — same pattern as `ATLAS_BRIDGE_SECRET` above, never
+committed:
+
+| Secret | Purpose |
+|---|---|
+| `QBO_CLIENT_ID` / `QBO_CLIENT_SECRET` | From the Intuit Developer app |
+| `QBO_ENVIRONMENT` | `sandbox` or `production` |
+| `QBO_DEFAULT_CUSTOMER_ID` | Id of a "Walk-in Customer" you create once in QBO — Sales Receipts require a CustomerRef |
+| `QBO_INVENTORY_ADJUSTMENT_ACCOUNT_ID` | QBO account used as InventoryAdjustment's AccountRef (e.g. an Inventory Asset or Shrinkage account) |
+
+Frontend env vars (`.env.local` / Netlify env vars — Client ID is public,
+unlike the secret):
+
+```
+VITE_QBO_CLIENT_ID=...
+VITE_QBO_ENVIRONMENT=sandbox
+```
+
+### 3. Deploy the edge functions
+
+Unlike `havelock-sso-verify`, these keep the default `verify_jwt=true` (the
+signed-in user's own session authorizes the call):
+
+```bash
+supabase functions deploy qbo-oauth-callback --project-ref troxvvwkiontbliwuvkn
+supabase functions deploy qbo-status --project-ref troxvvwkiontbliwuvkn
+supabase functions deploy qbo-list-items --project-ref troxvvwkiontbliwuvkn
+supabase functions deploy qbo-sync-bill --project-ref troxvvwkiontbliwuvkn
+supabase functions deploy qbo-sync-stock-entry --project-ref troxvvwkiontbliwuvkn
+supabase functions deploy qbo-sync-purchase-order --project-ref troxvvwkiontbliwuvkn
+```
+
+### 4. Connect and map products
+
+1. Open the **QuickBooks** tab and click **Connect QuickBooks** — this signs
+   into the real QBO company and consents to the app (only a person with QBO
+   login access can do this step).
+2. In the same tab, map each product to a QBO Item. Unmapped products are
+   skipped during sync (surfaced as a warning), not a hard failure.
+3. Test against the **Sandbox** company first — connect, map a product, push
+   one bill, and confirm a Sales Receipt appears with inventory qty reduced —
+   before switching `QBO_ENVIRONMENT` to `production`.
+
+**Note on stock entry semantics:** `qbo-sync-stock-entry` treats a stock
+entry's quantity as a movement (QtyDiff), matching the "Stock Entry" naming
+convention borrowed from OMAK's ERPNext-style flow. If Havelock's stock
+entries are meant to record an absolute physical count instead, switch
+`QtyDiff` to `NewQty` in `supabase/functions/qbo-sync-stock-entry/index.ts`.
+
 ## Roadmap
 
 - Product catalog / SKU reconciliation (currently product names are stored as

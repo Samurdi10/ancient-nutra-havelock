@@ -2,6 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { parseHavelockReportPdf } from '../lib/parseHavelockReport'
 import { parseStockBulkUpload } from '../lib/parseStockBulkUpload'
+import { QuickBooksTab } from './QuickBooksTab'
+import { QboPushButton } from './QboPushButton'
+import { isOAuthCallback } from '../lib/qbo'
 import type { Bill, ParsedReport, StockEntry, PurchaseOrder, AttendanceLog } from '../types'
 
 type RangePreset = 'today' | 'yesterday' | 'last7' | 'thismonth' | 'custom'
@@ -177,7 +180,9 @@ function computePoItemTotals(item: DraftPoItem): { netTotal: number; total: numb
 
 export function HavelockReportPage() {
   const [theme, setTheme] = useState<string>(currentTheme())
-  const [activeSection, setActiveSection] = useState<'report' | 'prices' | 'stock' | 'po' | 'attendance'>('report')
+  const [activeSection, setActiveSection] = useState<
+    'report' | 'prices' | 'stock' | 'po' | 'attendance' | 'qbo'
+  >(isOAuthCallback() ? 'qbo' : 'report')
   const [priceRows, setPriceRows] = useState<PriceRow[]>([])
   const [priceSearch, setPriceSearch] = useState('')
   const [priceError, setPriceError] = useState<string | null>(null)
@@ -829,6 +834,12 @@ export function HavelockReportPage() {
         >
           Attendance
         </button>
+        <button
+          className={activeSection === 'qbo' ? 'nav active' : 'nav'}
+          onClick={() => setActiveSection('qbo')}
+        >
+          QuickBooks
+        </button>
         <div className="r-foot">
           <div className="r-av">AN</div>
           <div>
@@ -1213,6 +1224,7 @@ export function HavelockReportPage() {
                         <th>Items</th>
                         <th>Total</th>
                         <th>Status</th>
+                        <th>QuickBooks</th>
                         <th></th>
                       </tr>
                     </thead>
@@ -1240,6 +1252,14 @@ export function HavelockReportPage() {
                               <option value="Rejected">Rejected</option>
                               <option value="Completed">Completed</option>
                             </select>
+                          </td>
+                          <td>
+                            <QboPushButton
+                              recordType="purchase_order"
+                              recordId={po.id}
+                              disabled={po.status !== 'Completed'}
+                              disabledReason="Only Completed purchase orders can be pushed to QuickBooks."
+                            />
                           </td>
                           <td>
                             <button className="btn sm ghost" onClick={() => handleDeletePo(po.id)}>
@@ -1502,6 +1522,7 @@ export function HavelockReportPage() {
                         <th>Items</th>
                         <th>Nearest Expiry</th>
                         <th>Total</th>
+                        <th>QuickBooks</th>
                         <th></th>
                       </tr>
                     </thead>
@@ -1529,6 +1550,9 @@ export function HavelockReportPage() {
                           </td>
                           <td>{nearestExpiry ?? '—'}</td>
                           <td className="num">LKR {entry.total.toLocaleString()}</td>
+                          <td>
+                            <QboPushButton recordType="stock_entry" recordId={entry.id} />
+                          </td>
                           <td>
                             <button className="btn sm ghost" onClick={() => handleDeleteStockEntry(entry.id)}>
                               Delete
@@ -1711,6 +1735,8 @@ export function HavelockReportPage() {
               </div>
             )}
           </>
+        ) : activeSection === 'qbo' ? (
+          <QuickBooksTab />
         ) : (
           <>
         <div className="topbar">
@@ -1998,6 +2024,7 @@ export function HavelockReportPage() {
                       <th>Items</th>
                       <th>Net Total</th>
                       <th>Payment</th>
+                      <th>QuickBooks</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2014,6 +2041,9 @@ export function HavelockReportPage() {
                         </td>
                         <td className="num">{bill.net_total.toLocaleString()}</td>
                         <td>{bill.payment_method}</td>
+                        <td>
+                          <QboPushButton recordType="bill" recordId={bill.id} />
+                        </td>
                       </tr>
                     ))}
                   </tbody>
