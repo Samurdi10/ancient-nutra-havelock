@@ -206,11 +206,11 @@ supabase functions deploy qbo-sync-purchase-order --project-ref troxvvwkiontbliw
    one bill, and confirm a Sales Receipt appears with inventory qty reduced —
    before switching `QBO_ENVIRONMENT` to `production`.
 
-**Note on stock entry semantics:** `qbo-sync-stock-entry` treats a stock
-entry's quantity as a movement (QtyDiff), matching the "Stock Entry" naming
-convention borrowed from OMAK's ERPNext-style flow. If Havelock's stock
-entries are meant to record an absolute physical count instead, switch
-`QtyDiff` to `NewQty` in `supabase/functions/qbo-sync-stock-entry/index.ts`.
+**Note on stock entry semantics:** Havelock's Stock Entries record an
+absolute physical count (a stock take — see "Physical Stock Entry" above),
+not a movement, so `qbo-sync-stock-entry` pushes each line's quantity as
+`NewQty` (QBO sets on-hand to that number) rather than `QtyDiff` (which would
+add/subtract from whatever QBO already thinks is on hand).
 
 ## Roadmap
 

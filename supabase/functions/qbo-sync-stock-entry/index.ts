@@ -2,12 +2,11 @@
 // havelock_stock_entry_items) to QuickBooks Online as an InventoryAdjustment.
 // Call with { stockEntryId }.
 //
-// ASSUMPTION TO VERIFY WITH THE BUSINESS: a stock entry's `quantity` per line
-// is treated here as a **movement (QtyDiff)** — positive to add stock,
-// negative to remove — matching the "Stock Entry = movement" convention used
-// by ERPNext-style systems (which OMAK's flow appears modeled on), not an
-// absolute physical count. If Havelock's stock entries actually record an
-// absolute new count instead, switch `QtyDiff` below to `NewQty`.
+// A stock entry's `quantity` per line is an ABSOLUTE physical count (a stock
+// take / bulk upload reads it from "Closing Stock"), not a movement — so this
+// pushes it as `NewQty`, not `QtyDiff`. Using QtyDiff here would silently
+// stack every count on top of QBO's existing on-hand number instead of
+// correcting it.
 //
 // Env (Supabase function secrets):
 //   QBO_INVENTORY_ADJUSTMENT_ACCOUNT_ID — the QBO account (typically an
@@ -87,7 +86,7 @@ Deno.serve(async (req) => {
       DetailType: 'InventoryAdjustmentLine',
       ItemAdjustmentLineDetail: {
         ItemRef: { value: itemRef.value, name: itemRef.name },
-        QtyDiff: item.quantity,
+        NewQty: item.quantity,
       },
     })
   }
