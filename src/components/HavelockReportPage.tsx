@@ -22,8 +22,15 @@ function itemLines(bill: Bill): string[] {
   })
 }
 
+/** Formats a Date as "yyyy-mm-dd" using its LOCAL calendar date — not
+ *  toISOString(), which converts to UTC first and silently shifts the date
+ *  by a day in timezones ahead of UTC (e.g. midnight July 1 in Sri Lanka,
+ *  UTC+5:30, is still June 30 in UTC). */
 function isoDate(d: Date): string {
-  return d.toISOString().slice(0, 10)
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }
 
 /** Loosely normalizes a product name for matching POS names against the website's — collapses whitespace/case/punctuation differences, not a fuzzy/NLP match. */
