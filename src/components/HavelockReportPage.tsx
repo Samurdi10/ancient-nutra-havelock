@@ -125,7 +125,7 @@ async function saveParsedReport(parsed: ParsedReport, sourceFile: string): Promi
       .from('havelock_bills')
       .upsert(
         {
-          report_date: parsed.reportDate,
+          report_date: bill.date,
           outlet: bill.outlet,
           bill_time: bill.billTime,
           invoice_number: bill.invoiceNumber,
@@ -134,7 +134,7 @@ async function saveParsedReport(parsed: ParsedReport, sourceFile: string): Promi
           payment_method: bill.paymentMethod,
           source_file: sourceFile,
         },
-        { onConflict: 'invoice_number' },
+        { onConflict: 'report_date,invoice_number' },
       )
       .select('id')
       .single()
@@ -725,8 +725,8 @@ export function HavelockReportPage() {
       await saveParsedReport(preview.report, preview.fileName)
       setPreview(null)
       setRangePreset('custom')
-      setCustomStart(preview.report.reportDate)
-      setCustomEnd(preview.report.reportDate)
+      setCustomStart(preview.report.dateRange.start)
+      setCustomEnd(preview.report.dateRange.end)
     } catch (err) {
       setParseError(err instanceof Error ? err.message : 'Failed to save this report.')
     } finally {
@@ -1838,7 +1838,12 @@ export function HavelockReportPage() {
         {preview && (
           <div className="modal-backdrop">
             <div className="modal-card">
-              <h2>Review before saving — {dateLabel(preview.report.reportDate)}</h2>
+              <h2>
+                Review before saving —{' '}
+                {preview.report.dateRange.start === preview.report.dateRange.end
+                  ? dateLabel(preview.report.dateRange.start)
+                  : `${dateLabel(preview.report.dateRange.start)} – ${dateLabel(preview.report.dateRange.end)}`}
+              </h2>
               <p className="subtitle">
                 Parsed {preview.report.bills.length} bill
                 {preview.report.bills.length === 1 ? '' : 's'} from {preview.fileName}.
@@ -1859,6 +1864,7 @@ export function HavelockReportPage() {
                   <table className="tbl">
                     <thead>
                       <tr>
+                        {preview.report.dateRange.start !== preview.report.dateRange.end && <th>Date</th>}
                         <th>Time</th>
                         <th>Invoice No.</th>
                         <th>Items</th>
@@ -1867,8 +1873,11 @@ export function HavelockReportPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {preview.report.bills.map((bill) => (
-                        <tr key={bill.invoiceNumber}>
+                      {preview.report.bills.map((bill, idx) => (
+                        <tr key={`${bill.invoiceNumber}-${idx}`}>
+                          {preview.report.dateRange.start !== preview.report.dateRange.end && (
+                            <td>{dateLabel(bill.date)}</td>
+                          )}
                           <td>{bill.billTime}</td>
                           <td>{bill.invoiceNumber}</td>
                           <td className="wrap">

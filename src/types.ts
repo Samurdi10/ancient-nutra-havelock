@@ -25,6 +25,9 @@ export interface Bill {
 
 /** One parsed bill, before it has been saved to Supabase. */
 export interface ParsedBill {
+  /** ISO yyyy-mm-dd — a single PDF can span more than one calendar day (its
+   *  "Date Range" line may cover 2 dates), so this is per-bill, not per-report. */
+  date: string
   outlet: string
   billTime: string
   invoiceNumber: string
@@ -42,7 +45,9 @@ export interface ParsedBillItem {
 }
 
 export interface ParsedReport {
-  reportDate: string
+  /** Min/max across all bills' dates — usually the same day, but a single PDF
+   *  can span 2 calendar days (see ParsedBill.date), so this is a range. */
+  dateRange: { start: string; end: string }
   bills: ParsedBill[]
   /** From the PDF's own "Total Bill / Avg Bill" summary line, for cross-checking. */
   stated: {

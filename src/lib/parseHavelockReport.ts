@@ -102,6 +102,10 @@ async function extractRows(pdf: pdfjsLib.PDFDocumentProxy): Promise<Row[]> {
 
 interface BillListEntry {
   outlet: string
+  /** Null only if the bill list's very first row lacked a Date column match —
+   *  should never happen in practice, but the caller must handle it rather
+   *  than silently guessing a date. */
+  date: string | null
   time: string
   invoiceNumber: string
   orderNumber: string | null
@@ -124,11 +128,14 @@ function parseBillsRow(
 
   const prefix = row.text.slice(0, row.text.indexOf(invoiceNumber)).trim()
   const dateMatch = prefix.match(DATE)
+  // The bill list only reprints the Date column when it changes, so a row
+  // with no date match inherits the most recently seen one — this is what
+  // lets a single report span 2 calendar days without every row repeating it.
   if (dateMatch) state.date = toIsoDate(dateMatch[0])
   const outletText = prefix.replace(DATE, '').replace(TIME, '').trim()
   if (outletText) state.outlet = outletText
 
-  return { outlet: state.outlet, time, invoiceNumber, orderNumber }
+  return { outlet: state.outlet, date: state.date, time, invoiceNumber, orderNumber }
 }
 
 interface ItemsRowParsed {
@@ -266,7 +273,13 @@ export async function parseHavelockReportPdf(file: File): Promise<ParsedReport> 
     // closing row since every real bill records how it was paid).
     if (totalsRow.paymentMethod) {
       const entry = billList[bills.length]
+      if (!entry.date) {
+        warnings.push(
+          `Bill ${entry.invoiceNumber} had no Date column match in the bill list — review its date carefully before saving.`,
+        )
+      }
       bills.push({
+        date: entry.date ?? new Date().toISOString().slice(0, 10),
         outlet: entry.outlet,
         billTime: entry.time,
         invoiceNumber: entry.invoiceNumber,
@@ -285,6 +298,27 @@ export async function parseHavelockReportPdf(file: File): Promise<ParsedReport> 
     )
   }
 
+  // Invoice numbers are only unique WITHIN a calendar day — the same PDF can
+  // legitimately reuse a number across two different dates (confirmed from a
+  // report spanning 23/07/2026-24/07/2026, where several invoice numbers
+  // appear once per day). Bills are saved by upserting on (report_date,
+  // invoice_number), so what actually collides is that composite key, not the
+  // invoice number alone — flag only genuine same-day repeats, which would
+  // otherwise silently overwrite each other on save.
+  const seenByDateAndInvoice = new Map<string, number>()
+  for (const bill of bills) {
+    const key = `${bill.date}|${bill.invoiceNumber}`
+    seenByDateAndInvoice.set(key, (seenByDateAndInvoice.get(key) ?? 0) + 1)
+  }
+  for (const [key, count] of seenByDateAndInvoice) {
+    if (count > 1) {
+      const [date, invoiceNumber] = key.split('|')
+      warnings.push(
+        `Invoice number ${invoiceNumber} appears ${count} times on ${date} in this report — saving will overwrite all but the last occurrence. Review these bills carefully before saving.`,
+      )
+    }
+  }
+
   const parsedTotal = bills.reduce((s, b) => s + b.netTotal, 0)
   if (stated.avgBill !== null && bills.length > 0) {
     const computedAvg = parsedTotal / bills.length
@@ -295,7 +329,12 @@ export async function parseHavelockReportPdf(file: File): Promise<ParsedReport> 
     }
   }
 
-  const reportDate = billState.date ?? new Date().toISOString().slice(0, 10)
+  const billDates = bills.map((b) => b.date)
+  const fallbackDate = new Date().toISOString().slice(0, 10)
+  const dateRange =
+    billDates.length > 0
+      ? { start: billDates.reduce((a, b) => (b < a ? b : a)), end: billDates.reduce((a, b) => (b > a ? b : a)) }
+      : { start: fallbackDate, end: fallbackDate }
 
-  return { reportDate, bills, stated, warnings }
+  return { dateRange, bills, stated, warnings }
 }
