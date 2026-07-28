@@ -37,11 +37,13 @@ export function QuickBooksTab() {
 
   useEffect(() => {
     async function boot() {
-      if (isOAuthCallback()) {
-        const err = await completeOAuthCallback()
-        if (err) setError(err)
-      }
+      // Run the OAuth exchange first, but don't set its error until after
+      // refreshStatus() — refreshStatus() clears `error` at its start, which
+      // would otherwise wipe out the real connect failure message before it
+      // ever reached the screen.
+      const oauthError = isOAuthCallback() ? await completeOAuthCallback() : null
       await refreshStatus()
+      if (oauthError) setError(oauthError)
     }
     boot()
   }, [])
