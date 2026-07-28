@@ -1341,7 +1341,7 @@ export function HavelockReportPage() {
                     <input
                       ref={bulkFileInputRef}
                       type="file"
-                      accept=".csv,.xlsx,.xls"
+                      accept=".csv,.xlsx,.xls,.pdf,application/pdf"
                       style={{ display: 'none' }}
                       onChange={(e) => {
                         const file = e.target.files?.[0]
@@ -1353,7 +1353,7 @@ export function HavelockReportPage() {
                       onClick={() => bulkFileInputRef.current?.click()}
                       disabled={bulkUploading}
                     >
-                      {bulkUploading ? 'Reading file…' : '⬆ Bulk upload (OMAK stock export or CSV/Excel)'}
+                      {bulkUploading ? 'Reading file…' : '⬆ Bulk upload (OMAK stock export, PDF, or CSV/Excel)'}
                     </button>
                   </div>
                   {bulkWarnings.length > 0 && (

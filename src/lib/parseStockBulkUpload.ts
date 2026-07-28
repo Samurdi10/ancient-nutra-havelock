@@ -1,4 +1,9 @@
 import ExcelJS from 'exceljs'
+import * as pdfjsLib from 'pdfjs-dist'
+import workerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+import type { TextItem } from 'pdfjs-dist/types/src/display/api'
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = workerSrc
 
 export interface ParsedStockRow {
   category: string | null
@@ -167,6 +172,84 @@ async function parseXlsxTemplate(buffer: ArrayBuffer): Promise<ParsedStockUpload
   return rowsFromTable(table[0], table.slice(1))
 }
 
+interface PosItem {
+  str: string
+  x: number
+  width: number
+  y: number
+}
+
+/** Reconstructs a table (rows of cell strings) from a PDF's positioned text,
+ *  since PDFs have no real cell structure — only text with x/y coordinates.
+ *  Text is grouped into rows by y, then within a row, adjacent text is merged
+ *  into one cell unless the gap between them is wide enough to be a real
+ *  column boundary (a plain word-space is a few points; a column gutter is
+ *  much wider). This is a generic best-effort extraction — unlike the Bill
+ *  Wise Report parser, there's no known fixed layout to rely on here. */
+async function extractPdfTable(buffer: ArrayBuffer): Promise<string[][]> {
+  const pdf = await pdfjsLib.getDocument({ data: buffer }).promise
+  const table: string[][] = []
+  const GAP_THRESHOLD = 8
+
+  for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+    const page = await pdf.getPage(pageNum)
+    const content = await page.getTextContent()
+    const items: PosItem[] = content.items
+      .filter((item): item is TextItem => 'transform' in item && item.str.trim().length > 0)
+      .map((item) => ({ str: item.str.trim(), x: item.transform[4], width: item.width, y: item.transform[5] }))
+
+    const clusters: PosItem[][] = []
+    const sorted = [...items].sort((a, b) => b.y - a.y || a.x - b.x)
+    const TOLERANCE = 2.5
+    for (const item of sorted) {
+      const cluster = clusters.find((c) => Math.abs(c[0].y - item.y) < TOLERANCE)
+      if (cluster) cluster.push(item)
+      else clusters.push([item])
+    }
+
+    for (const cluster of clusters) {
+      cluster.sort((a, b) => a.x - b.x)
+      const cells: string[] = []
+      let cellParts: string[] = []
+      let cellEnd = -Infinity
+      for (const item of cluster) {
+        if (cellParts.length > 0 && item.x - cellEnd > GAP_THRESHOLD) {
+          cells.push(cellParts.join(' '))
+          cellParts = []
+        }
+        cellParts.push(item.str)
+        cellEnd = item.x + item.width
+      }
+      if (cellParts.length > 0) cells.push(cellParts.join(' '))
+      table.push(cells)
+    }
+  }
+  return table
+}
+
+async function parsePdfTemplate(buffer: ArrayBuffer): Promise<ParsedStockUpload> {
+  const table = (await extractPdfTable(buffer)).filter((row) => row.some((cell) => cell.trim().length > 0))
+  if (table.length === 0) {
+    return { source: 'template', rows: [], warnings: ['This PDF has no readable table content.'] }
+  }
+  // Scan for the header row rather than assuming row 0, since a title/date
+  // line (e.g. "Current Stock Summary Report") often precedes the real table.
+  for (let i = 0; i < table.length; i++) {
+    const nameCol = columnIndex(table[i], [/product name|description/i, /^item$/i, /product|item/i])
+    const qtyCol = columnIndex(table[i], [/closing stock/i, /^qty$|^quantity$/i, /qty|quantity/i])
+    if (nameCol !== -1 && qtyCol !== -1) {
+      return rowsFromTable(table[i], table.slice(i + 1))
+    }
+  }
+  return {
+    source: 'template',
+    rows: [],
+    warnings: [
+      'Could not find a header row with product name and quantity columns in this PDF. Review the file layout, or export as CSV/Excel instead.',
+    ],
+  }
+}
+
 function looksLikeHtml(text: string): boolean {
   return /Current Stock Summary Report|<table|<html/i.test(text.slice(0, 2000))
 }
@@ -176,8 +259,16 @@ function isZipSignature(buffer: ArrayBuffer): boolean {
   return bytes[0] === 0x50 && bytes[1] === 0x4b
 }
 
+function isPdfSignature(buffer: ArrayBuffer): boolean {
+  const bytes = new Uint8Array(buffer.slice(0, 5))
+  return bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46 // "%PDF"
+}
+
 export async function parseStockBulkUpload(file: File): Promise<ParsedStockUpload> {
   const buffer = await file.arrayBuffer()
+  if (isPdfSignature(buffer)) {
+    return parsePdfTemplate(buffer)
+  }
   const asText = new TextDecoder('utf-8').decode(buffer.slice(0, 4000))
 
   if (looksLikeHtml(asText)) {
