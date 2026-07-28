@@ -111,20 +111,24 @@ function parseBillsRow(
   row: Row,
   state: { outlet: string; date: string | null },
 ): BillListEntry | null {
-  const timeMatch = row.text.match(TIME)
-  if (!timeMatch) return null
+  // Time is sometimes genuinely blank for a bill (a POS data gap, not a
+  // parsing issue) — a row is still a real bill as long as it carries the
+  // invoice/order numbers, so those (not the time) are what make a row count.
   const nums = row.text.match(/\d{6,}/g)
   if (!nums || nums.length === 0) return null
   const invoiceNumber = nums[0]
   const orderNumber = nums[1] ?? null
 
-  const prefix = row.text.slice(0, timeMatch.index).trim()
+  const timeMatch = row.text.match(TIME)
+  const time = timeMatch ? timeMatch[0] : ''
+
+  const prefix = row.text.slice(0, row.text.indexOf(invoiceNumber)).trim()
   const dateMatch = prefix.match(DATE)
   if (dateMatch) state.date = toIsoDate(dateMatch[0])
-  const outletText = prefix.replace(DATE, '').trim()
+  const outletText = prefix.replace(DATE, '').replace(TIME, '').trim()
   if (outletText) state.outlet = outletText
 
-  return { outlet: state.outlet, time: timeMatch[0], invoiceNumber, orderNumber }
+  return { outlet: state.outlet, time, invoiceNumber, orderNumber }
 }
 
 interface ItemsRowParsed {
@@ -158,13 +162,17 @@ interface TotalsRowParsed {
 }
 
 function parseTotalsRow(row: Row): TotalsRowParsed {
-  // Net Total is always the LAST numeric token: some reports print an extra
-  // VAT column before it ("VAT Net Total Payment Method"), so taking the
-  // first numeric token would grab VAT (usually 0) instead.
-  const numericTokens = row.tokens.filter((t) => NUMERIC.test(t))
-  const netTotal = numericTokens.length > 0 ? toNumber(numericTokens[numericTokens.length - 1]) : null
-  const paymentTokens = row.tokens.filter((t) => !NUMERIC.test(t))
-  const paymentMethod = paymentTokens.join(' ').trim() || null
+  // Net Total is the LAST token of the row's *leading* contiguous numeric
+  // run — some reports print an extra VAT column before it ("VAT Net Total
+  // Payment Method"), so the run can be 1 or 2 tokens long. Everything from
+  // the first non-numeric token onward is the payment method, taken verbatim
+  // rather than filtered for non-numeric tokens: a split payment prints as
+  // "Card (Visa): 18900 Cash: 50.00", where the embedded amounts are part of
+  // the payment text, not additional net-total candidates.
+  let split = 0
+  while (split < row.tokens.length && NUMERIC.test(row.tokens[split])) split++
+  const netTotal = split > 0 ? toNumber(row.tokens[split - 1]) : null
+  const paymentMethod = row.tokens.slice(split).join(' ').trim() || null
   return { netTotal, paymentMethod }
 }
 
