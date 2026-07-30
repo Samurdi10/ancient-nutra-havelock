@@ -212,6 +212,7 @@ export function HavelockReportPage() {
   const [draftStockItems, setDraftStockItems] = useState<DraftStockItem[]>([])
   const [bulkUploading, setBulkUploading] = useState(false)
   const [bulkWarnings, setBulkWarnings] = useState<string[]>([])
+  const [expandedStockEntryId, setExpandedStockEntryId] = useState<string | null>(null)
   const bulkFileInputRef = useRef<HTMLInputElement>(null)
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([])
   const [poLoading, setPoLoading] = useState(true)
@@ -1547,13 +1548,28 @@ export function HavelockReportPage() {
                           <td>{entry.ref_doc_no}</td>
                           <td className="wrap">{entry.remarks}</td>
                           <td className="wrap">
-                            {entry.stock_entry_items
-                              .map((it) =>
-                                it.expiry_date
-                                  ? `${it.quantity} ${it.product_name} (exp ${it.expiry_date})`
-                                  : `${it.quantity} ${it.product_name}`,
-                              )
-                              .join(', ')}
+                            {expandedStockEntryId === entry.id ? (
+                              <>
+                                {entry.stock_entry_items.map((it) => (
+                                  <div key={it.id}>
+                                    {it.quantity} {it.product_name}
+                                    {it.expiry_date ? ` — exp ${it.expiry_date}` : ''}
+                                  </div>
+                                ))}
+                                <button
+                                  className="btn sm ghost"
+                                  style={{ marginTop: 6 }}
+                                  onClick={() => setExpandedStockEntryId(null)}
+                                >
+                                  Hide
+                                </button>
+                              </>
+                            ) : (
+                              <button className="btn sm ghost" onClick={() => setExpandedStockEntryId(entry.id)}>
+                                {entry.stock_entry_items.length} item{entry.stock_entry_items.length === 1 ? '' : 's'}{' '}
+                                — view
+                              </button>
+                            )}
                           </td>
                           <td>{nearestExpiry ?? '—'}</td>
                           <td className="num">LKR {entry.total.toLocaleString()}</td>
