@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { parseHavelockReportPdf } from '../lib/parseHavelockReport'
 import { parseStockBulkUpload } from '../lib/parseStockBulkUpload'
@@ -1541,35 +1541,22 @@ export function HavelockReportPage() {
                           .filter((d): d is string => d !== null)
                           .sort()
                         const nearestExpiry = expiries[0] ?? null
+                        const isExpanded = expandedStockEntryId === entry.id
                         return (
-                        <tr key={entry.id}>
+                        <Fragment key={entry.id}>
+                        <tr>
                           <td>{entry.entry_no}</td>
                           <td>{entry.entry_date}</td>
                           <td>{entry.ref_doc_no}</td>
                           <td className="wrap">{entry.remarks}</td>
                           <td className="wrap">
-                            {expandedStockEntryId === entry.id ? (
-                              <>
-                                {entry.stock_entry_items.map((it) => (
-                                  <div key={it.id}>
-                                    {it.quantity} {it.product_name}
-                                    {it.expiry_date ? ` — exp ${it.expiry_date}` : ''}
-                                  </div>
-                                ))}
-                                <button
-                                  className="btn sm ghost"
-                                  style={{ marginTop: 6 }}
-                                  onClick={() => setExpandedStockEntryId(null)}
-                                >
-                                  Hide
-                                </button>
-                              </>
-                            ) : (
-                              <button className="btn sm ghost" onClick={() => setExpandedStockEntryId(entry.id)}>
-                                {entry.stock_entry_items.length} item{entry.stock_entry_items.length === 1 ? '' : 's'}{' '}
-                                — view
-                              </button>
-                            )}
+                            <button
+                              className="btn sm ghost"
+                              onClick={() => setExpandedStockEntryId(isExpanded ? null : entry.id)}
+                            >
+                              {entry.stock_entry_items.length} item{entry.stock_entry_items.length === 1 ? '' : 's'}{' '}
+                              {isExpanded ? '▲ hide' : '▼ view'}
+                            </button>
                           </td>
                           <td>{nearestExpiry ?? '—'}</td>
                           <td className="num">LKR {entry.total.toLocaleString()}</td>
@@ -1582,6 +1569,31 @@ export function HavelockReportPage() {
                             </button>
                           </td>
                         </tr>
+                        {isExpanded && (
+                          <tr>
+                            <td colSpan={9} style={{ padding: '0 0 16px 0', background: 'var(--surface)' }}>
+                              <table className="tbl" style={{ margin: '0 0 0 24px', width: 'calc(100% - 24px)' }}>
+                                <thead>
+                                  <tr>
+                                    <th>Product Name</th>
+                                    <th>Quantity</th>
+                                    <th>Expiry Date</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {entry.stock_entry_items.map((it) => (
+                                    <tr key={it.id}>
+                                      <td className="wrap">{it.product_name}</td>
+                                      <td className="num">{it.quantity}</td>
+                                      <td>{it.expiry_date ?? '—'}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </td>
+                          </tr>
+                        )}
+                        </Fragment>
                         )
                       })}
                     </tbody>
