@@ -15,17 +15,25 @@ export interface ParsedStockRow {
   expiryDate: string | null
 }
 
-/** Normalizes a date cell (ISO, dd/mm/yyyy, or a JS Date already) to "yyyy-mm-dd", or null if unparseable. */
+/** Normalizes a date cell (ISO, yyyy.mm.dd, dd/mm/yyyy, or a JS Date already)
+ *  to "yyyy-mm-dd", or null if unparseable. */
 function normalizeDateCell(raw: string): string | null {
   const s = raw.trim()
   if (!s) return null
   const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/)
   if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`
+  const ymdDot = s.match(/^(\d{4})\.(\d{1,2})\.(\d{1,2})$/)
+  if (ymdDot) return `${ymdDot[1]}-${ymdDot[2].padStart(2, '0')}-${ymdDot[3].padStart(2, '0')}`
   const dmy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
   if (dmy) return `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`
   const parsed = new Date(s)
-  if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10)
-  return null
+  if (Number.isNaN(parsed.getTime())) return null
+  // Local calendar components, not toISOString() — that converts to UTC
+  // first and silently shifts the date by a day in timezones ahead of UTC.
+  const year = parsed.getFullYear()
+  const month = String(parsed.getMonth() + 1).padStart(2, '0')
+  const day = String(parsed.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }
 
 export interface ParsedStockUpload {
@@ -108,7 +116,9 @@ function parseCsvRows(text: string): string[][] {
 // misleading one that happens to appear earlier, like "Inward Qty (IN)".
 function columnIndex(header: string[], patterns: RegExp[]): number {
   for (const pattern of patterns) {
-    const idx = header.findIndex((h) => pattern.test(h.trim()))
+    // findIndex visits every index including holes (unlike map/forEach), so
+    // a defensive `?? ''` here is real protection, not just belt-and-suspenders.
+    const idx = header.findIndex((h) => pattern.test((h ?? '').trim()))
     if (idx !== -1) return idx
   }
   return -1
@@ -159,14 +169,20 @@ async function parseXlsxTemplate(buffer: ArrayBuffer): Promise<ParsedStockUpload
   if (!sheet) return { source: 'template', rows: [], warnings: ['This workbook has no sheets.'] }
   const table: string[][] = []
   sheet.eachRow((row) => {
+    // ExcelJS's row.values is a sparse array — unset cells are real holes,
+    // not `null` entries. A plain .map() silently skips holes (leaving them
+    // as holes in the result too), which then crashes columnIndex's
+    // .findIndex() downstream (unlike .map, it does visit holes, passing
+    // `undefined`). Indexing directly, rather than mapping, avoids that.
     const values = row.values as unknown[]
-    table.push(
-      values.slice(1).map((v) => {
-        if (v === null || v === undefined) return ''
-        if (v instanceof Date) return v.toISOString().slice(0, 10)
-        return String(v)
-      }),
-    )
+    const cells: string[] = []
+    for (let i = 1; i < values.length; i++) {
+      const v = values[i]
+      if (v === null || v === undefined) cells.push('')
+      else if (v instanceof Date) cells.push(v.toISOString().slice(0, 10))
+      else cells.push(String(v))
+    }
+    table.push(cells)
   })
   if (table.length === 0) return { source: 'template', rows: [], warnings: ['This sheet is empty.'] }
   return rowsFromTable(table[0], table.slice(1))
