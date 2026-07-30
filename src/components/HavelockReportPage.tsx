@@ -5,7 +5,7 @@ import { parseStockBulkUpload } from '../lib/parseStockBulkUpload'
 import { QuickBooksTab } from './QuickBooksTab'
 import { QboPushButton } from './QboPushButton'
 import { isOAuthCallback } from '../lib/qbo'
-import type { Bill, ParsedReport, StockEntry, PurchaseOrder, AttendanceLog } from '../types'
+import type { Bill, ParsedReport, StockEntry, StockEntryItem, PurchaseOrder, AttendanceLog } from '../types'
 
 type RangePreset = 'today' | 'yesterday' | 'last7' | 'thismonth' | 'custom'
 
@@ -488,6 +488,56 @@ export function HavelockReportPage() {
   async function handleDeleteStockEntry(id: string) {
     await supabase.from('havelock_stock_entries').delete().eq('id', id)
     loadStockEntries()
+  }
+
+  function updateStockItemLocal(entryId: string, itemId: string, patch: Partial<StockEntryItem>) {
+    setStockEntries((prev) =>
+      prev.map((entry) =>
+        entry.id !== entryId
+          ? entry
+          : {
+              ...entry,
+              stock_entry_items: entry.stock_entry_items.map((it) =>
+                it.id === itemId ? { ...it, ...patch } : it,
+              ),
+            },
+      ),
+    )
+  }
+
+  async function saveStockItemEdit(entryId: string, itemId: string) {
+    const entry = stockEntries.find((e) => e.id === entryId)
+    const item = entry?.stock_entry_items.find((it) => it.id === itemId)
+    if (!entry || !item) return
+    const total = item.quantity * item.rate
+    const { error } = await supabase
+      .from('havelock_stock_entry_items')
+      .update({ quantity: item.quantity, expiry_date: item.expiry_date, total })
+      .eq('id', itemId)
+    if (error) {
+      setStockError(error.message)
+      return
+    }
+    const entryTotal = entry.stock_entry_items.reduce((s, it) => s + (it.id === itemId ? total : it.total), 0)
+    const { error: entryError } = await supabase
+      .from('havelock_stock_entries')
+      .update({ total: entryTotal })
+      .eq('id', entryId)
+    if (entryError) {
+      setStockError(entryError.message)
+      return
+    }
+    setStockEntries((prev) =>
+      prev.map((e) =>
+        e.id !== entryId
+          ? e
+          : {
+              ...e,
+              total: entryTotal,
+              stock_entry_items: e.stock_entry_items.map((it) => (it.id === itemId ? { ...it, total } : it)),
+            },
+      ),
+    )
   }
 
   async function loadPurchaseOrders() {
@@ -1584,8 +1634,33 @@ export function HavelockReportPage() {
                                   {entry.stock_entry_items.map((it) => (
                                     <tr key={it.id}>
                                       <td className="wrap">{it.product_name}</td>
-                                      <td className="num">{it.quantity}</td>
-                                      <td>{it.expiry_date ?? '—'}</td>
+                                      <td>
+                                        <input
+                                          className="input"
+                                          type="number"
+                                          style={{ width: 90 }}
+                                          value={it.quantity}
+                                          onChange={(e) =>
+                                            updateStockItemLocal(entry.id, it.id, {
+                                              quantity: Number(e.target.value) || 0,
+                                            })
+                                          }
+                                          onBlur={() => saveStockItemEdit(entry.id, it.id)}
+                                        />
+                                      </td>
+                                      <td>
+                                        <input
+                                          className="input"
+                                          type="date"
+                                          value={it.expiry_date ?? ''}
+                                          onChange={(e) =>
+                                            updateStockItemLocal(entry.id, it.id, {
+                                              expiry_date: e.target.value || null,
+                                            })
+                                          }
+                                          onBlur={() => saveStockItemEdit(entry.id, it.id)}
+                                        />
+                                      </td>
                                     </tr>
                                   ))}
                                 </tbody>
