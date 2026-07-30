@@ -29,7 +29,11 @@ type TableKind = 'bills' | 'items' | 'totals' | null
 
 const NUMERIC = /^[\d,]+(\.\d+)?$/
 const TIME = /\d{1,2}:\d{2}\s*[AP]M/
-const DATE = /\d{2}\/\d{2}\/\d{4}/
+// Day and month are NOT zero-padded in the bill list's Date column (e.g.
+// "1/7/2026", "12/7/2026" — always d/m/yyyy, unlike the zero-padded
+// "Date Range : 01/07/2026 - 01/07/2026" header line), so both parts are
+// 1-2 digits here.
+const DATE = /\d{1,2}\/\d{1,2}\/\d{4}/
 
 function toNumber(token: string): number {
   return Number(token.replace(/,/g, '')) || 0
@@ -60,7 +64,7 @@ function isSummaryLine(text: string): boolean {
 
 function toIsoDate(ddmmyyyy: string): string {
   const [d, m, y] = ddmmyyyy.split('/')
-  return `${y}-${m}-${d}`
+  return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`
 }
 
 /** Group a page's positioned text items into visual rows, top-to-bottom / left-to-right. */
