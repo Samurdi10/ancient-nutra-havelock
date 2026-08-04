@@ -14,7 +14,7 @@ import type {
   AuditLogEntry,
 } from '../types'
 
-const AUDIT_VIEWER_EMAIL = 'info@silkrouteventures.com'
+const AUDIT_VIEWER_EMAILS = ['info@silkrouteventures.com', 'marketing@esilkroute.com.lk']
 
 /** Best-effort audit log write — an audit-log failure should never block the
  *  actual price/stock change it's describing. */
@@ -216,7 +216,7 @@ function computePoItemTotals(item: DraftPoItem): { netTotal: number; total: numb
 }
 
 export function HavelockReportPage({ userEmail }: { userEmail: string | null }) {
-  const canViewAudit = userEmail?.toLowerCase() === AUDIT_VIEWER_EMAIL
+  const canViewAudit = !!userEmail && AUDIT_VIEWER_EMAILS.includes(userEmail.toLowerCase())
   const [theme, setTheme] = useState<string>(currentTheme())
   const [activeSection, setActiveSection] = useState<
     'report' | 'prices' | 'stock' | 'po' | 'attendance' | 'qbo' | 'audit'
