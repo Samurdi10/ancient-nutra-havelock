@@ -118,6 +118,16 @@ export interface PurchaseOrder {
   purchase_order_items: PurchaseOrderItem[]
 }
 
+export interface AuditLogEntry {
+  id: string
+  entity_type: 'product_price' | 'stock_entry'
+  action: 'created' | 'updated' | 'deleted'
+  summary: string
+  details: Record<string, unknown> | null
+  changed_by_email: string | null
+  created_at: string
+}
+
 export interface AttendanceLog {
   id: string
   staff_name: string

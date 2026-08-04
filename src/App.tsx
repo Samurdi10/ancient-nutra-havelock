@@ -75,9 +75,10 @@ function App() {
   }, [])
 
   if (!supabaseConfigured) return <SetupNeeded />
-  if (loading || ssoBusy) return session ? <HavelockReportPage /> : <SigningIn />
+  if (loading || ssoBusy)
+    return session ? <HavelockReportPage userEmail={session.user.email ?? null} /> : <SigningIn />
 
-  return session ? <HavelockReportPage /> : <Login />
+  return session ? <HavelockReportPage userEmail={session.user.email ?? null} /> : <Login />
 }
 
 export default App

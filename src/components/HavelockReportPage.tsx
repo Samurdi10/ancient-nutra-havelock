@@ -4,7 +4,29 @@ import { parseHavelockReportPdf } from '../lib/parseHavelockReport'
 import { QuickBooksTab } from './QuickBooksTab'
 import { QboPushButton } from './QboPushButton'
 import { isOAuthCallback } from '../lib/qbo'
-import type { Bill, ParsedReport, StockEntry, StockEntryItem, PurchaseOrder, AttendanceLog } from '../types'
+import type {
+  Bill,
+  ParsedReport,
+  StockEntry,
+  StockEntryItem,
+  PurchaseOrder,
+  AttendanceLog,
+  AuditLogEntry,
+} from '../types'
+
+const AUDIT_VIEWER_EMAIL = 'info@silkrouteventures.com'
+
+/** Best-effort audit log write — an audit-log failure should never block the
+ *  actual price/stock change it's describing. */
+async function logAudit(
+  entityType: 'product_price' | 'stock_entry',
+  action: 'created' | 'updated' | 'deleted',
+  summary: string,
+  details: Record<string, unknown>,
+): Promise<void> {
+  const { error } = await supabase.from('havelock_audit_log').insert({ entity_type: entityType, action, summary, details })
+  if (error) console.warn('audit log:', error.message)
+}
 
 type RangePreset = 'today' | 'yesterday' | 'last7' | 'thismonth' | 'custom'
 
@@ -184,11 +206,15 @@ function computePoItemTotals(item: DraftPoItem): { netTotal: number; total: numb
   return { netTotal, total }
 }
 
-export function HavelockReportPage() {
+export function HavelockReportPage({ userEmail }: { userEmail: string | null }) {
+  const canViewAudit = userEmail?.toLowerCase() === AUDIT_VIEWER_EMAIL
   const [theme, setTheme] = useState<string>(currentTheme())
   const [activeSection, setActiveSection] = useState<
-    'report' | 'prices' | 'stock' | 'po' | 'attendance' | 'qbo'
+    'report' | 'prices' | 'stock' | 'po' | 'attendance' | 'qbo' | 'audit'
   >(isOAuthCallback() ? 'qbo' : 'report')
+  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([])
+  const [auditLoading, setAuditLoading] = useState(false)
+  const [auditError, setAuditError] = useState<string | null>(null)
   const [priceRows, setPriceRows] = useState<PriceRow[]>([])
   const [priceSearch, setPriceSearch] = useState('')
   const [priceError, setPriceError] = useState<string | null>(null)
@@ -303,6 +329,7 @@ export function HavelockReportPage() {
     setPriceError(null)
     const price = Number(editPriceValue)
     const compareAtPrice = editCompareAtValue.trim() ? Number(editCompareAtValue) : null
+    const oldRow = priceRows.find((r) => r.product_name === editingPriceProduct)
     const { error } = await supabase
       .from('havelock_product_prices')
       .update({ price, compare_at_price: compareAtPrice })
@@ -311,6 +338,13 @@ export function HavelockReportPage() {
       setPriceError(error.message)
       return
     }
+    await logAudit('product_price', 'updated', `Changed price of "${editingPriceProduct}" from LKR ${oldRow?.price ?? '?'} to LKR ${price}`, {
+      product_name: editingPriceProduct,
+      old_price: oldRow?.price ?? null,
+      new_price: price,
+      old_compare_at_price: oldRow?.compare_at_price ?? null,
+      new_compare_at_price: compareAtPrice,
+    })
     setEditingPriceProduct(null)
     await loadPrices()
   }
@@ -318,15 +352,22 @@ export function HavelockReportPage() {
   async function handleAddProduct() {
     if (!newProductName.trim() || !newProductPrice.trim()) return
     setPriceError(null)
+    const price = Number(newProductPrice)
+    const compareAtPrice = newProductCompareAt.trim() ? Number(newProductCompareAt) : null
     const { error } = await supabase.from('havelock_product_prices').insert({
       product_name: newProductName.trim(),
-      price: Number(newProductPrice),
-      compare_at_price: newProductCompareAt.trim() ? Number(newProductCompareAt) : null,
+      price,
+      compare_at_price: compareAtPrice,
     })
     if (error) {
       setPriceError(error.message)
       return
     }
+    await logAudit('product_price', 'created', `Added product "${newProductName.trim()}" at LKR ${price}`, {
+      product_name: newProductName.trim(),
+      price,
+      compare_at_price: compareAtPrice,
+    })
     setShowAddProduct(false)
     setNewProductName('')
     setNewProductPrice('')
@@ -362,6 +403,23 @@ export function HavelockReportPage() {
   useEffect(() => {
     loadStockEntries()
   }, [])
+
+  async function loadAuditLogs() {
+    setAuditLoading(true)
+    setAuditError(null)
+    const { data, error } = await supabase
+      .from('havelock_audit_log')
+      .select('id, entity_type, action, summary, details, changed_by_email, created_at')
+      .order('created_at', { ascending: false })
+      .limit(500)
+    if (error) setAuditError(error.message)
+    else setAuditLogs((data ?? []) as AuditLogEntry[])
+    setAuditLoading(false)
+  }
+
+  useEffect(() => {
+    if (canViewAudit) loadAuditLogs()
+  }, [canViewAudit])
 
   const stockItemMatches = useMemo(() => {
     const q = stockItemSearch.trim().toLowerCase()
@@ -410,7 +468,7 @@ export function HavelockReportPage() {
           remarks: stockRemarks || null,
           total,
         })
-        .select('id')
+        .select('id, entry_no')
         .single()
       if (entryError) throw entryError
 
@@ -427,6 +485,14 @@ export function HavelockReportPage() {
       )
       if (itemsError) throw itemsError
 
+      await logAudit('stock_entry', 'created', `Created stock entry ${entryRow.entry_no} (${stockEntryDate}, ${draftStockItems.length} items, LKR ${total.toLocaleString()})`, {
+        entry_no: entryRow.entry_no,
+        entry_date: stockEntryDate,
+        ref_doc_no: stockRefDocNo || null,
+        total,
+        items: draftStockItems,
+      })
+
       setShowStockForm(false)
       resetStockForm()
       await loadStockEntries()
@@ -438,6 +504,20 @@ export function HavelockReportPage() {
   }
 
   async function handleDeleteStockEntry(id: string) {
+    const entry = stockEntries.find((e) => e.id === id)
+    if (entry) {
+      await logAudit(
+        'stock_entry',
+        'deleted',
+        `Deleted stock entry ${entry.entry_no} (${entry.entry_date}, ${entry.stock_entry_items.length} items, LKR ${entry.total.toLocaleString()})`,
+        {
+          entry_no: entry.entry_no,
+          entry_date: entry.entry_date,
+          total: entry.total,
+          items: entry.stock_entry_items,
+        },
+      )
+    }
     await supabase.from('havelock_stock_entries').delete().eq('id', id)
     loadStockEntries()
   }
@@ -850,6 +930,14 @@ export function HavelockReportPage() {
         >
           QuickBooks
         </button>
+        {canViewAudit && (
+          <button
+            className={activeSection === 'audit' ? 'nav active' : 'nav'}
+            onClick={() => setActiveSection('audit')}
+          >
+            Audit Log
+          </button>
+        )}
         <div className="r-foot">
           <div className="r-av">AN</div>
           <div>
@@ -1770,6 +1858,55 @@ export function HavelockReportPage() {
           </>
         ) : activeSection === 'qbo' ? (
           <QuickBooksTab />
+        ) : activeSection === 'audit' ? (
+          <>
+            <div className="topbar">
+              <div>
+                <h1>Audit Log</h1>
+                <div className="sub">{auditLogs.length} amendment{auditLogs.length === 1 ? '' : 's'} recorded</div>
+              </div>
+              <div className="tools">
+                <button className="btn ghost" onClick={handleSignOut}>
+                  Sign out
+                </button>
+              </div>
+            </div>
+
+            {auditError && <p className="error">{auditError}</p>}
+
+            {auditLoading ? (
+              <p className="muted">Loading…</p>
+            ) : auditLogs.length === 0 ? (
+              <p className="muted">No amendments recorded yet.</p>
+            ) : (
+              <div className="panel">
+                <div className="tbl-wrap">
+                  <table className="tbl">
+                    <thead>
+                      <tr>
+                        <th>When</th>
+                        <th>Area</th>
+                        <th>Action</th>
+                        <th>Summary</th>
+                        <th>Changed by</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {auditLogs.map((log) => (
+                        <tr key={log.id}>
+                          <td>{new Date(log.created_at).toLocaleString()}</td>
+                          <td>{log.entity_type === 'product_price' ? 'Price List' : 'Stock Entry'}</td>
+                          <td>{log.action}</td>
+                          <td className="wrap">{log.summary}</td>
+                          <td>{log.changed_by_email ?? '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </>
         ) : (
           <>
         <div className="topbar">
