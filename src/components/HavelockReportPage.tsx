@@ -28,7 +28,7 @@ async function logAudit(
   if (error) console.warn('audit log:', error.message)
 }
 
-type RangePreset = 'today' | 'yesterday' | 'last7' | 'thismonth' | 'custom'
+type RangePreset = 'today' | 'yesterday' | 'last7' | 'thismonth' | 'month' | 'custom'
 
 function currentTheme(): string {
   if (typeof document === 'undefined') return 'light'
@@ -63,7 +63,12 @@ function normalizeProductName(name: string): string {
     .trim()
 }
 
-function computeRange(preset: RangePreset, customStart: string, customEnd: string): { start: string; end: string } {
+function computeRange(
+  preset: RangePreset,
+  customStart: string,
+  customEnd: string,
+  selectedMonth: string,
+): { start: string; end: string } {
   const today = new Date()
   today.setHours(0, 0, 0, 0)
   if (preset === 'yesterday') {
@@ -79,6 +84,12 @@ function computeRange(preset: RangePreset, customStart: string, customEnd: strin
   if (preset === 'thismonth') {
     const start = new Date(today.getFullYear(), today.getMonth(), 1)
     return { start: isoDate(start), end: isoDate(today) }
+  }
+  if (preset === 'month') {
+    const [y, m] = selectedMonth.split('-').map(Number)
+    const start = new Date(y, m - 1, 1)
+    const end = new Date(y, m, 0) // day 0 of next month = last day of this month
+    return { start: isoDate(start), end: isoDate(end) }
   }
   if (preset === 'custom') return { start: customStart, end: customEnd }
   return { start: isoDate(today), end: isoDate(today) } // today
@@ -270,6 +281,7 @@ export function HavelockReportPage({ userEmail }: { userEmail: string | null }) 
   const [rangePreset, setRangePreset] = useState<RangePreset>('today')
   const [customStart, setCustomStart] = useState(() => isoDate(new Date()))
   const [customEnd, setCustomEnd] = useState(() => isoDate(new Date()))
+  const [selectedMonth, setSelectedMonth] = useState(() => isoDate(new Date()).slice(0, 7))
   const [bills, setBills] = useState<Bill[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -282,7 +294,10 @@ export function HavelockReportPage({ userEmail }: { userEmail: string | null }) 
   const [saving, setSaving] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const range = useMemo(() => computeRange(rangePreset, customStart, customEnd), [rangePreset, customStart, customEnd])
+  const range = useMemo(
+    () => computeRange(rangePreset, customStart, customEnd, selectedMonth),
+    [rangePreset, customStart, customEnd, selectedMonth],
+  )
 
   async function loadBillsForRange(start: string, end: string) {
     setLoading(true)
@@ -2076,6 +2091,21 @@ export function HavelockReportPage({ userEmail }: { userEmail: string | null }) 
           >
             📅 This Month
           </button>
+          <button
+            className={`btn sm ${rangePreset === 'month' ? 'pri' : 'ghost'}`}
+            onClick={() => setRangePreset('month')}
+          >
+            📅 Monthly
+          </button>
+          {rangePreset === 'month' && (
+            <input
+              className="input"
+              type="month"
+              value={selectedMonth}
+              max={isoDate(new Date()).slice(0, 7)}
+              onChange={(e) => setSelectedMonth(e.target.value)}
+            />
+          )}
           <button
             className={`btn sm ${rangePreset === 'custom' ? 'pri' : 'ghost'}`}
             onClick={() => setRangePreset('custom')}
