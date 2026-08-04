@@ -139,6 +139,25 @@ This repo only covers the app side of SSO. Someone with access to the SPINE
 repo still needs to register a new tile/surface `module_havelock` pointing at
 this app's deployed URL — that's a separate repo, not part of this project.
 
+### `selftest` — check the wiring before clicking the tile
+
+[`supabase/functions/selftest`](supabase/functions/selftest/index.ts) reports
+which of the secrets above this deployment actually has — presence booleans
+only, never a value. Deploy it the same way (`--no-verify-jwt`, it does no
+auth of its own — it never returns a secret value, only whether one is set):
+
+```bash
+supabase functions deploy selftest --project-ref troxvvwkiontbliwuvkn --no-verify-jwt
+```
+
+Then curl it — `ok:false` names exactly which secret is missing, instead of a
+silent bounce to the login page:
+
+```bash
+curl -s https://troxvvwkiontbliwuvkn.supabase.co/functions/v1/selftest
+# -> {"ok":true,"surface":"module_havelock","secrets":{"ATLAS_BRIDGE_SECRET":true,...}}
+```
+
 ## QuickBooks Online
 
 The **QuickBooks** tab connects this app to QuickBooks Online (QBO) so daily
