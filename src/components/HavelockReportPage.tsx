@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase'
 import { parseHavelockReportPdf } from '../lib/parseHavelockReport'
 import { QuickBooksTab } from './QuickBooksTab'
 import { QboPushButton } from './QboPushButton'
-import { isOAuthCallback } from '../lib/qbo'
+import { isOAuthCallback, syncBill } from '../lib/qbo'
 import type {
   Bill,
   ParsedReport,
@@ -160,7 +160,8 @@ function downloadCsv(bills: Bill[], fileName: string) {
 
 const PAYMENT_COLORS = ['c-blue', 'c-amber', 'c-green', 'c-teal', 'c-red', 'c-purple']
 
-async function saveParsedReport(parsed: ParsedReport, sourceFile: string): Promise<void> {
+async function saveParsedReport(parsed: ParsedReport, sourceFile: string): Promise<string[]> {
+  const billIds: string[] = []
   for (const bill of parsed.bills) {
     const { data: billRow, error: billError } = await supabase
       .from('havelock_bills')
@@ -192,7 +193,9 @@ async function saveParsedReport(parsed: ParsedReport, sourceFile: string): Promi
       })),
     )
     if (itemsError) throw itemsError
+    billIds.push(billRow.id)
   }
+  return billIds
 }
 
 interface PriceRow {
@@ -292,6 +295,7 @@ export function HavelockReportPage({ userEmail }: { userEmail: string | null }) 
   const [parseError, setParseError] = useState<string | null>(null)
   const [preview, setPreview] = useState<{ report: ParsedReport; fileName: string } | null>(null)
   const [saving, setSaving] = useState(false)
+  const [qboPushResult, setQboPushResult] = useState<{ total: number; success: number } | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const range = useMemo(
@@ -887,12 +891,20 @@ export function HavelockReportPage({ userEmail }: { userEmail: string | null }) 
   async function handleConfirmSave() {
     if (!preview) return
     setSaving(true)
+    setQboPushResult(null)
     try {
-      await saveParsedReport(preview.report, preview.fileName)
+      const billIds = await saveParsedReport(preview.report, preview.fileName)
       setPreview(null)
       setRangePreset('custom')
       setCustomStart(preview.report.dateRange.start)
       setCustomEnd(preview.report.dateRange.end)
+
+      // Auto-push every saved bill to QuickBooks — no manual "Push to
+      // QuickBooks" step. Best-effort: a push failure (e.g. an unmapped
+      // product) never undoes the save, it just shows up in the summary.
+      const results = await Promise.allSettled(billIds.map((id) => syncBill(id)))
+      const success = results.filter((r) => r.status === 'fulfilled' && !r.value.error).length
+      setQboPushResult({ total: billIds.length, success })
     } catch (err) {
       setParseError(err instanceof Error ? err.message : 'Failed to save this report.')
     } finally {
@@ -2137,6 +2149,13 @@ export function HavelockReportPage({ userEmail }: { userEmail: string | null }) 
 
         {parseError && <p className="error">{parseError}</p>}
         {loadError && <p className="error">{loadError}</p>}
+        {qboPushResult && (
+          <p className={qboPushResult.success === qboPushResult.total ? 'muted' : 'error'}>
+            {qboPushResult.success === qboPushResult.total
+              ? `Pushed all ${qboPushResult.total} bill${qboPushResult.total === 1 ? '' : 's'} to QuickBooks.`
+              : `Pushed ${qboPushResult.success}/${qboPushResult.total} bills to QuickBooks — check the QuickBooks tab for details on the rest.`}
+          </p>
+        )}
 
         {preview && (
           <div className="modal-backdrop">

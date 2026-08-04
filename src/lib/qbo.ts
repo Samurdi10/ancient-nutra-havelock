@@ -8,9 +8,10 @@
 // the Client Secret never reaches the browser).
 //
 // Sync flow: syncBill / syncStockEntry / syncPurchaseOrder call the matching
-// qbo-sync-* edge function for one record at a time (manual "Push to
-// QuickBooks" buttons in the UI, not automatic — a bad sync should be
-// reviewable before it lands in the accounting system).
+// qbo-sync-* edge function for one record at a time. Bills auto-push right
+// after a daily report PDF is saved (see handleConfirmSave in
+// HavelockReportPage.tsx); stock entries and purchase orders still use the
+// manual "Push to QuickBooks" button.
 
 import { supabase } from './supabase'
 

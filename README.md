@@ -170,8 +170,12 @@ committed:
 |---|---|
 | `QBO_CLIENT_ID` / `QBO_CLIENT_SECRET` | From the Intuit Developer app |
 | `QBO_ENVIRONMENT` | `sandbox` or `production` |
-| `QBO_DEFAULT_CUSTOMER_ID` | Id of a "Walk-in Customer" you create once in QBO — Sales Receipts require a CustomerRef |
 | `QBO_INVENTORY_ADJUSTMENT_ACCOUNT_ID` | QBO account used as InventoryAdjustment's AccountRef (e.g. an Inventory Asset or Shrinkage account) |
+
+Sales Receipts require a CustomerRef, but no manual setup is needed for it —
+`qbo-sync-bill` finds-or-creates a single "Walk-in Customer" in QBO
+automatically on first push (same pattern as vendor auto-creation for
+purchase orders).
 
 Frontend env vars (`.env.local` / Netlify env vars — Client ID is public,
 unlike the secret):

@@ -141,6 +141,26 @@ export async function findOrCreateVendorRef(
   return { value: vendor.Id, name: vendor.DisplayName }
 }
 
+/** Finds a Customer by exact DisplayName, creating one if it doesn't exist yet.
+ *  Retail POS sales aren't tied to a real customer record, so every bill posts
+ *  under one shared "Walk-in Customer" — same free-text-identity pattern as
+ *  findOrCreateVendorRef, so no manual QBO customer setup is needed. */
+export async function findOrCreateCustomerRef(
+  conn: QboConnection,
+  displayName: string,
+): Promise<{ value: string; name: string }> {
+  const escaped = displayName.replace(/'/g, "\\'")
+  const result = await queryQbo(conn, `select Id, DisplayName from Customer where DisplayName = '${escaped}'`)
+  const found = (result as { QueryResponse?: { Customer?: { Id: string; DisplayName: string }[] } })
+    .QueryResponse?.Customer?.[0]
+  if (found) return { value: found.Id, name: found.DisplayName }
+
+  const created = await postQboEntity(conn, 'customer', { DisplayName: displayName })
+  const customer = (created as { Customer?: { Id: string; DisplayName: string } }).Customer
+  if (!customer) throw new Error(`Could not create QBO customer "${displayName}"`)
+  return { value: customer.Id, name: customer.DisplayName }
+}
+
 /** Looks up the QBO item mapping for a product name; null if unmapped. */
 export async function findQboItemRef(
   supabase: SupabaseClient,

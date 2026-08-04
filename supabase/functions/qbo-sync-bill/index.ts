@@ -6,10 +6,10 @@
 // listed back in the response as `unmappedProducts`, mirroring the warning
 // style already used for PDF-parsing and price-list mismatches in this app.
 //
-// Env (Supabase function secrets):
-//   QBO_DEFAULT_CUSTOMER_ID — QBO requires a CustomerRef on every Sales
-//     Receipt; create a single "Walk-in Customer" in QBO once and put its Id
-//     here (retail POS sales aren't tied to a real customer record).
+// QBO requires a CustomerRef on every Sales Receipt; retail POS sales aren't
+// tied to a real customer record, so every bill posts under one shared
+// "Walk-in Customer", found-or-created automatically (see
+// findOrCreateCustomerRef) — no manual QBO setup needed.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import {
@@ -18,8 +18,11 @@ import {
   getValidConnection,
   postQboEntity,
   findQboItemRef,
+  findOrCreateCustomerRef,
   logSyncResult,
 } from '../_shared/qbo-client.ts'
+
+const WALK_IN_CUSTOMER_NAME = 'Walk-in Customer'
 
 interface BillItemRow {
   product_name: string
@@ -38,9 +41,6 @@ interface BillRow {
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: CORS_HEADERS })
   if (req.method !== 'POST') return jsonResponse({ error: 'method not allowed' }, 405)
-
-  const customerId = Deno.env.get('QBO_DEFAULT_CUSTOMER_ID')
-  if (!customerId) return jsonResponse({ error: 'QBO_DEFAULT_CUSTOMER_ID is not configured' }, 500)
 
   let billId: string | undefined
   try {
@@ -99,10 +99,11 @@ Deno.serve(async (req) => {
 
   try {
     const conn = await getValidConnection(supabase)
+    const customerRef = await findOrCreateCustomerRef(conn, WALK_IN_CUSTOMER_NAME)
     const receipt = await postQboEntity(conn, 'salesreceipt', {
       TxnDate: bill.report_date,
       DocNumber: bill.invoice_number,
-      CustomerRef: { value: customerId },
+      CustomerRef: { value: customerRef.value },
       Line: lines,
     })
     const qboId = (receipt as { SalesReceipt?: { Id?: string } }).SalesReceipt?.Id
