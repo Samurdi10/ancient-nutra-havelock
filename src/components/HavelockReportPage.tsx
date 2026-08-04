@@ -19,7 +19,7 @@ const AUDIT_VIEWER_EMAIL = 'info@silkrouteventures.com'
 /** Best-effort audit log write — an audit-log failure should never block the
  *  actual price/stock change it's describing. */
 async function logAudit(
-  entityType: 'product_price' | 'stock_entry',
+  entityType: 'product_price' | 'stock_entry' | 'attendance',
   action: 'created' | 'updated' | 'deleted',
   summary: string,
   details: Record<string, unknown>,
@@ -115,6 +115,15 @@ function formatDuration(timeIn: string, timeOut: string | null): string {
   const hours = Math.floor(totalMinutes / 60)
   const minutes = totalMinutes % 60
   return `${hours}h ${minutes}m`
+}
+
+/** Converts an ISO timestamp to the local "yyyy-MM-ddTHH:mm" a
+ *  datetime-local input needs, using LOCAL time components (not
+ *  toISOString(), which would shift the wall-clock time to UTC). */
+function toDatetimeLocal(iso: string): string {
+  const d = new Date(iso)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
 function downloadCsv(bills: Bill[], fileName: string) {
@@ -255,6 +264,9 @@ export function HavelockReportPage({ userEmail }: { userEmail: string | null }) 
   const [attendanceError, setAttendanceError] = useState<string | null>(null)
   const [clockInName, setClockInName] = useState('')
   const [clockInPlace, setClockInPlace] = useState('Havelock City Mall')
+  const [editingAttendanceId, setEditingAttendanceId] = useState<string | null>(null)
+  const [editTimeInValue, setEditTimeInValue] = useState('')
+  const [editTimeOutValue, setEditTimeOutValue] = useState('')
   const [rangePreset, setRangePreset] = useState<RangePreset>('today')
   const [customStart, setCustomStart] = useState(() => isoDate(new Date()))
   const [customEnd, setCustomEnd] = useState(() => isoDate(new Date()))
@@ -743,7 +755,63 @@ export function HavelockReportPage({ userEmail }: { userEmail: string | null }) 
     else await loadAttendanceLogs()
   }
 
+  function startEditAttendance(log: AttendanceLog) {
+    setEditingAttendanceId(log.id)
+    setEditTimeInValue(toDatetimeLocal(log.time_in))
+    setEditTimeOutValue(log.time_out ? toDatetimeLocal(log.time_out) : '')
+  }
+
+  function cancelEditAttendance() {
+    setEditingAttendanceId(null)
+  }
+
+  async function saveEditAttendance() {
+    if (!editingAttendanceId) return
+    const original = attendanceLogs.find((l) => l.id === editingAttendanceId)
+    if (!original) return
+    setAttendanceError(null)
+    const newTimeIn = new Date(editTimeInValue).toISOString()
+    const newTimeOut = editTimeOutValue ? new Date(editTimeOutValue).toISOString() : null
+    const { error } = await supabase
+      .from('havelock_attendance_logs')
+      .update({ time_in: newTimeIn, time_out: newTimeOut })
+      .eq('id', editingAttendanceId)
+    if (error) {
+      setAttendanceError(error.message)
+      return
+    }
+    await logAudit(
+      'attendance',
+      'updated',
+      `Changed ${original.staff_name}'s clock in/out on ${original.log_date} (in: ${formatClockTime(original.time_in)} → ${formatClockTime(newTimeIn)}, out: ${original.time_out ? formatClockTime(original.time_out) : '—'} → ${newTimeOut ? formatClockTime(newTimeOut) : '—'})`,
+      {
+        staff_name: original.staff_name,
+        log_date: original.log_date,
+        old_time_in: original.time_in,
+        new_time_in: newTimeIn,
+        old_time_out: original.time_out,
+        new_time_out: newTimeOut,
+      },
+    )
+    setEditingAttendanceId(null)
+    await loadAttendanceLogs()
+  }
+
   async function handleDeleteAttendance(id: string) {
+    const log = attendanceLogs.find((l) => l.id === id)
+    if (log) {
+      await logAudit(
+        'attendance',
+        'deleted',
+        `Deleted attendance record for ${log.staff_name} on ${log.log_date} (in: ${formatClockTime(log.time_in)}, out: ${log.time_out ? formatClockTime(log.time_out) : '—'})`,
+        {
+          staff_name: log.staff_name,
+          log_date: log.log_date,
+          time_in: log.time_in,
+          time_out: log.time_out,
+        },
+      )
+    }
     await supabase.from('havelock_attendance_logs').delete().eq('id', id)
     loadAttendanceLogs()
   }
@@ -1048,21 +1116,57 @@ export function HavelockReportPage({ userEmail }: { userEmail: string | null }) 
                       </tr>
                     </thead>
                     <tbody>
-                      {attendanceLogs.map((log) => (
-                        <tr key={log.id}>
-                          <td>{log.staff_name}</td>
-                          <td>{log.place}</td>
-                          <td>{log.log_date}</td>
-                          <td>{formatClockTime(log.time_in)}</td>
-                          <td>{log.time_out ? formatClockTime(log.time_out) : '—'}</td>
-                          <td>{formatDuration(log.time_in, log.time_out)}</td>
-                          <td>
-                            <button className="btn sm ghost" onClick={() => handleDeleteAttendance(log.id)}>
-                              Delete
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
+                      {attendanceLogs.map((log) =>
+                        editingAttendanceId === log.id ? (
+                          <tr key={log.id}>
+                            <td>{log.staff_name}</td>
+                            <td>{log.place}</td>
+                            <td>{log.log_date}</td>
+                            <td>
+                              <input
+                                className="input"
+                                type="datetime-local"
+                                value={editTimeInValue}
+                                onChange={(e) => setEditTimeInValue(e.target.value)}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                className="input"
+                                type="datetime-local"
+                                value={editTimeOutValue}
+                                onChange={(e) => setEditTimeOutValue(e.target.value)}
+                              />
+                            </td>
+                            <td>{formatDuration(log.time_in, log.time_out)}</td>
+                            <td style={{ display: 'flex', gap: 6 }}>
+                              <button className="btn sm pri" onClick={saveEditAttendance}>
+                                Save
+                              </button>
+                              <button className="btn sm ghost" onClick={cancelEditAttendance}>
+                                Cancel
+                              </button>
+                            </td>
+                          </tr>
+                        ) : (
+                          <tr key={log.id}>
+                            <td>{log.staff_name}</td>
+                            <td>{log.place}</td>
+                            <td>{log.log_date}</td>
+                            <td>{formatClockTime(log.time_in)}</td>
+                            <td>{log.time_out ? formatClockTime(log.time_out) : '—'}</td>
+                            <td>{formatDuration(log.time_in, log.time_out)}</td>
+                            <td style={{ display: 'flex', gap: 6 }}>
+                              <button className="btn sm ghost" onClick={() => startEditAttendance(log)}>
+                                Edit
+                              </button>
+                              <button className="btn sm ghost" onClick={() => handleDeleteAttendance(log.id)}>
+                                Delete
+                              </button>
+                            </td>
+                          </tr>
+                        ),
+                      )}
                     </tbody>
                   </table>
                 </div>
@@ -1895,7 +1999,13 @@ export function HavelockReportPage({ userEmail }: { userEmail: string | null }) 
                       {auditLogs.map((log) => (
                         <tr key={log.id}>
                           <td>{new Date(log.created_at).toLocaleString()}</td>
-                          <td>{log.entity_type === 'product_price' ? 'Price List' : 'Stock Entry'}</td>
+                          <td>
+                            {log.entity_type === 'product_price'
+                              ? 'Price List'
+                              : log.entity_type === 'stock_entry'
+                                ? 'Stock Entry'
+                                : 'Attendance'}
+                          </td>
                           <td>{log.action}</td>
                           <td className="wrap">{log.summary}</td>
                           <td>{log.changed_by_email ?? '—'}</td>

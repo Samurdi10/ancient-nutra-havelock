@@ -120,7 +120,7 @@ export interface PurchaseOrder {
 
 export interface AuditLogEntry {
   id: string
-  entity_type: 'product_price' | 'stock_entry'
+  entity_type: 'product_price' | 'stock_entry' | 'attendance'
   action: 'created' | 'updated' | 'deleted'
   summary: string
   details: Record<string, unknown> | null
