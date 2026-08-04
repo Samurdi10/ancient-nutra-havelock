@@ -1,7 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { parseHavelockReportPdf } from '../lib/parseHavelockReport'
-import { parseStockBulkUpload } from '../lib/parseStockBulkUpload'
 import { QuickBooksTab } from './QuickBooksTab'
 import { QboPushButton } from './QboPushButton'
 import { isOAuthCallback } from '../lib/qbo'
@@ -210,10 +209,7 @@ export function HavelockReportPage() {
   const [stockRemarks, setStockRemarks] = useState('')
   const [stockItemSearch, setStockItemSearch] = useState('')
   const [draftStockItems, setDraftStockItems] = useState<DraftStockItem[]>([])
-  const [bulkUploading, setBulkUploading] = useState(false)
-  const [bulkWarnings, setBulkWarnings] = useState<string[]>([])
   const [expandedStockEntryId, setExpandedStockEntryId] = useState<string | null>(null)
-  const bulkFileInputRef = useRef<HTMLInputElement>(null)
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([])
   const [poLoading, setPoLoading] = useState(true)
   const [poError, setPoError] = useState<string | null>(null)
@@ -392,56 +388,12 @@ export function HavelockReportPage() {
     setDraftStockItems((prev) => prev.filter((_, i) => i !== index))
   }
 
-  async function handleBulkFileChosen(file: File) {
-    setBulkUploading(true)
-    setBulkWarnings([])
-    try {
-      const parsed = await parseStockBulkUpload(file)
-      const warnings = [...parsed.warnings]
-      const noRateProducts: string[] = []
-      const newItems: DraftStockItem[] = parsed.rows.map((row) => {
-        let rate = row.rate
-        if (rate === null) {
-          rate = currentPriceFor(row.productName)
-          if (rate === null) {
-            rate = 0
-            noRateProducts.push(row.productName)
-          }
-        }
-        return {
-          productName: row.productName,
-          quantity: row.quantity,
-          rate,
-          manufacturingDate: row.manufacturingDate,
-          expiryDate: row.expiryDate,
-        }
-      })
-      if (noRateProducts.length > 0) {
-        warnings.push(
-          `No price found for ${noRateProducts.length} product(s) — added with rate 0, edit manually before confirming: ${noRateProducts.slice(0, 5).join(', ')}${noRateProducts.length > 5 ? ', …' : ''}`,
-        )
-      }
-      setDraftStockItems((prev) => {
-        const byName = new Map(prev.map((it) => [it.productName, it]))
-        for (const item of newItems) byName.set(item.productName, item)
-        return [...byName.values()]
-      })
-      setBulkWarnings(warnings)
-    } catch (err) {
-      setBulkWarnings([err instanceof Error ? err.message : 'Failed to read this file.'])
-    } finally {
-      setBulkUploading(false)
-      if (bulkFileInputRef.current) bulkFileInputRef.current.value = ''
-    }
-  }
-
   function resetStockForm() {
     setStockEntryDate(isoDate(new Date()))
     setStockRefDocNo('')
     setStockRemarks('')
     setStockItemSearch('')
     setDraftStockItems([])
-    setBulkWarnings([])
   }
 
   async function handleConfirmStockEntry() {
@@ -1394,35 +1346,6 @@ export function HavelockReportPage() {
                       placeholder="Optional"
                     />
                   </label>
-
-                  <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', marginBottom: 4 }}>
-                    <input
-                      ref={bulkFileInputRef}
-                      type="file"
-                      accept=".csv,.xlsx,.xls,.pdf,application/pdf"
-                      style={{ display: 'none' }}
-                      onChange={(e) => {
-                        const file = e.target.files?.[0]
-                        if (file) handleBulkFileChosen(file)
-                      }}
-                    />
-                    <button
-                      className="btn ghost sm"
-                      onClick={() => bulkFileInputRef.current?.click()}
-                      disabled={bulkUploading}
-                    >
-                      {bulkUploading ? 'Reading file…' : '⬆ Bulk upload (OMAK stock export, PDF, or CSV/Excel)'}
-                    </button>
-                  </div>
-                  {bulkWarnings.length > 0 && (
-                    <div className="panel" style={{ padding: 12, marginBottom: 10, borderColor: 'var(--amber)' }}>
-                      {bulkWarnings.map((w, i) => (
-                        <p key={i} className="error" style={{ color: 'var(--amber)', margin: '2px 0' }}>
-                          ⚠ {w}
-                        </p>
-                      ))}
-                    </div>
-                  )}
 
                   <div style={{ position: 'relative' }}>
                     <label className="fld">
