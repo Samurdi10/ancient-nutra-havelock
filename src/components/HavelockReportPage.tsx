@@ -728,6 +728,132 @@ export function HavelockReportPage({ userEmail }: { userEmail: string | null }) 
     loadPurchaseOrders()
   }
 
+  /** Opens a print-friendly PO document in a new tab, matching OMAK's own
+   *  Purchase Order layout — the browser's Print > Save as PDF gives the
+   *  actual downloadable file, so no PDF-generation library is needed. */
+  function handleDownloadPo(po: PurchaseOrder) {
+    const addedTime = new Date(po.created_at).toLocaleTimeString('en-US', { hour12: false })
+    const rows = po.purchase_order_items
+      .map(
+        (it) => `
+          <tr>
+            <td>${it.item_code ?? ''}</td>
+            <td>${it.product_name}</td>
+            <td class="num">${it.rate.toFixed(2)}</td>
+            <td class="num">${it.quantity.toFixed(2)}<br>${it.unit}</td>
+            <td class="num">${it.net_total.toFixed(2)}</td>
+            <td class="num">${it.discount_value.toFixed(2)}</td>
+            <td class="num">${it.tax_amount.toFixed(2)}</td>
+            <td>${it.tax_combination}</td>
+            <td class="num">${it.total.toFixed(2)}</td>
+          </tr>`,
+      )
+      .join('')
+
+    const html = `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Purchase Order - ${po.po_no}</title>
+<style>
+  body { font-family: Arial, Helvetica, sans-serif; color: #222; margin: 40px; font-size: 13px; }
+  .header { text-align: right; margin-bottom: 20px; }
+  .header h2 { margin: 0 0 4px; }
+  .header p { margin: 0; font-size: 12px; color: #444; }
+  h1 { font-size: 20px; font-weight: normal; border-bottom: 1px solid #ccc; padding-bottom: 12px; }
+  .meta-row { display: flex; gap: 40px; border-top: 1px solid #ccc; border-bottom: 1px solid #ccc; padding: 10px 0; margin: 16px 0; }
+  .cols { display: flex; gap: 60px; margin-bottom: 16px; }
+  .cols div { flex: 1; }
+  .cols p { margin: 2px 0; }
+  table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+  th { text-align: left; border-bottom: 1px solid #333; padding: 6px 8px; font-size: 12px; }
+  td { padding: 8px; vertical-align: top; border-bottom: 1px solid #eee; }
+  .num { text-align: right; }
+  .totals { width: 260px; margin-left: auto; margin-top: 16px; }
+  .totals div { display: flex; justify-content: space-between; padding: 4px 0; }
+  .remarks { border: 1px solid #333; min-height: 80px; width: 300px; padding: 8px; margin-top: 20px; }
+  .sign { display: flex; gap: 80px; margin-top: 80px; }
+  .sign div { border-top: 1px dashed #333; padding-top: 6px; width: 160px; }
+</style>
+</head>
+<body>
+  <div class="header">
+    <h2>Ancient Nutra - Havelock City Mall</h2>
+    <p>Address: (B-01 #05), Havelock City Mall, Havelock Road,, Colombo</p>
+    <p>Ph: 076 4410386</p>
+    <p>Email: support@ancientnutra.com</p>
+  </div>
+
+  <h1>Purchase Order - ${po.po_no}</h1>
+  <p>Printed By : ${po.created_by_email ?? ''}</p>
+
+  <div class="meta-row">
+    <div>PO No: ${po.po_no}</div>
+    <div>Date: ${po.po_date}</div>
+    <div>Ref Doc No: ${po.ref_doc_no ?? ''}</div>
+    <div>Status: ${po.status}</div>
+  </div>
+
+  <div class="cols">
+    <div>
+      <strong>Location:</strong>
+      <p>From: ${po.from_location}</p>
+      <p>To: ${po.to_location}</p>
+      <p>PO added by: ${po.created_by_email ?? ''}</p>
+      <p>PO added time: ${addedTime}</p>
+    </div>
+    <div>
+      <strong>Supplier:</strong>
+      <p>Name: ${po.supplier_name ?? ''}</p>
+      <p>Reg No: ${po.supplier_reg_no ?? ''}</p>
+    </div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Item Code</th>
+        <th>Item Name</th>
+        <th>Rate</th>
+        <th>Qty</th>
+        <th>Net Total</th>
+        <th>Discount Value</th>
+        <th>Tax Amount</th>
+        <th>Tax Combination</th>
+        <th>Total</th>
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  </table>
+
+  <div style="display: flex; justify-content: space-between;">
+    <div class="remarks">
+      <strong>Remarks</strong>
+      <p>${po.remarks ?? ''}</p>
+    </div>
+    <div class="totals">
+      <div><span>Net Total</span><span>${po.net_total.toFixed(2)}</span></div>
+      <div><span>Total Discount</span><span>${po.total_discount.toFixed(2)}</span></div>
+      <div><span>Total Tax</span><span>${po.total_tax.toFixed(2)}</span></div>
+      <div><strong>Total</strong><strong>${po.total.toFixed(2)}</strong></div>
+    </div>
+  </div>
+
+  <div class="sign">
+    <div>Authorised Signatory</div>
+    <div>Authorised Signatory</div>
+  </div>
+
+  <script>window.onload = () => window.print()</script>
+</body>
+</html>`
+
+    const win = window.open('', '_blank')
+    if (!win) return
+    win.document.write(html)
+    win.document.close()
+  }
+
   async function handleUpdatePoStatus(id: string, status: PurchaseOrder['status']) {
     await supabase.from('havelock_purchase_orders').update({ status }).eq('id', id)
     loadPurchaseOrders()
@@ -1490,7 +1616,10 @@ export function HavelockReportPage({ userEmail }: { userEmail: string | null }) 
                               disabledReason="Only Completed purchase orders can be pushed to QuickBooks."
                             />
                           </td>
-                          <td>
+                          <td style={{ display: 'flex', gap: 6 }}>
+                            <button className="btn sm ghost" onClick={() => handleDownloadPo(po)}>
+                              Download
+                            </button>
                             <button className="btn sm ghost" onClick={() => handleDeletePo(po.id)}>
                               Delete
                             </button>
