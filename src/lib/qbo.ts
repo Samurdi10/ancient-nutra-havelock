@@ -18,6 +18,18 @@ import { supabase } from './supabase'
 const FUNCTIONS_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`
 const STATE_KEY = 'qbo_oauth_state'
 
+/** Loosely normalizes a product/item name for matching across systems whose
+ *  naming varies slightly (case, punctuation, spacing) — not a fuzzy/NLP
+ *  match, so "Ashwagandha - 60 capsules" and "Ashwagandha Extract" still
+ *  count as different products. */
+export function normalizeProductName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[()]/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
+
 async function authedFetch(path: string, body?: unknown): Promise<Record<string, unknown>> {
   const { data } = await supabase.auth.getSession()
   const accessToken = data.session?.access_token

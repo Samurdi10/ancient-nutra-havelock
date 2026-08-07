@@ -9,6 +9,7 @@ import {
   fetchQboItemMap,
   upsertQboItemMap,
   removeQboItemMap,
+  normalizeProductName,
   type QboStatus,
   type QboItemOption,
 } from '../lib/qbo'
@@ -21,6 +22,8 @@ export function QuickBooksTab() {
   const [itemMap, setItemMap] = useState<Record<string, { id: string; name: string }>>({})
   const [products, setProducts] = useState<string[]>([])
   const [search, setSearch] = useState('')
+  const [autoMapping, setAutoMapping] = useState(false)
+  const [autoMapSummary, setAutoMapSummary] = useState<{ mapped: number; remaining: number } | null>(null)
 
   async function refreshStatus() {
     setLoading(true)
@@ -90,6 +93,45 @@ export function QuickBooksTab() {
     setItemMap((prev) => ({ ...prev, [productName]: { id: item.id, name: item.name } }))
   }
 
+  /** Maps every still-unmapped product to a QBO item with the same
+   *  normalized name, when exactly one such item exists — a same-name
+   *  match, not a fuzzy guess, so it never picks a wrong item. Anything
+   *  left unmatched (no QBO item with that name, or more than one) stays
+   *  for manual mapping. */
+  async function handleAutoMap() {
+    setAutoMapping(true)
+    setAutoMapSummary(null)
+    try {
+      const byNormalizedName = new Map<string, QboItemOption[]>()
+      for (const item of qboItems) {
+        const key = normalizeProductName(item.name)
+        const list = byNormalizedName.get(key) ?? []
+        list.push(item)
+        byNormalizedName.set(key, list)
+      }
+
+      let mapped = 0
+      const newMappings: Record<string, { id: string; name: string }> = {}
+      for (const product of products) {
+        if (itemMap[product]) continue
+        const candidates = byNormalizedName.get(normalizeProductName(product))
+        if (!candidates || candidates.length !== 1) continue
+        const item = candidates[0]
+        await upsertQboItemMap(product, item)
+        newMappings[product] = { id: item.id, name: item.name }
+        mapped++
+      }
+
+      setItemMap((prev) => ({ ...prev, ...newMappings }))
+      const remaining = products.filter((p) => !itemMap[p] && !newMappings[p]).length
+      setAutoMapSummary({ mapped, remaining })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Auto-mapping failed.')
+    } finally {
+      setAutoMapping(false)
+    }
+  }
+
   if (loading) return <p className="muted">Loading…</p>
 
   return (
@@ -128,6 +170,19 @@ export function QuickBooksTab() {
               Only products mapped here get pushed when you click "Push to QuickBooks" — unmapped
               products are skipped and listed as a warning instead of failing the whole sync.
             </p>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 8 }}>
+              <button className="btn sm ghost" onClick={handleAutoMap} disabled={autoMapping}>
+                {autoMapping ? 'Auto-mapping…' : 'Auto-map by name'}
+              </button>
+              {autoMapSummary && (
+                <span className="muted" style={{ fontSize: 13 }}>
+                  Mapped {autoMapSummary.mapped} product{autoMapSummary.mapped === 1 ? '' : 's'} automatically
+                  {autoMapSummary.remaining > 0
+                    ? ` — ${autoMapSummary.remaining} still need${autoMapSummary.remaining === 1 ? 's' : ''} manual mapping (no exact name match found in QuickBooks).`
+                    : '.'}
+                </span>
+              )}
+            </div>
             <input
               className="input"
               placeholder="Search products…"

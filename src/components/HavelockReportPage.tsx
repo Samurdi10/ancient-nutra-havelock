@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase'
 import { parseHavelockReportPdf } from '../lib/parseHavelockReport'
 import { QuickBooksTab } from './QuickBooksTab'
 import { QboPushButton } from './QboPushButton'
-import { isOAuthCallback, syncBill } from '../lib/qbo'
+import { isOAuthCallback, syncBill, normalizeProductName } from '../lib/qbo'
 import type {
   Bill,
   ParsedReport,
@@ -52,15 +52,6 @@ function isoDate(d: Date): string {
   const month = String(d.getMonth() + 1).padStart(2, '0')
   const day = String(d.getDate()).padStart(2, '0')
   return `${year}-${month}-${day}`
-}
-
-/** Loosely normalizes a product name for matching POS names against the website's — collapses whitespace/case/punctuation differences, not a fuzzy/NLP match. */
-function normalizeProductName(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[()]/g, ' ')
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim()
 }
 
 function computeRange(
