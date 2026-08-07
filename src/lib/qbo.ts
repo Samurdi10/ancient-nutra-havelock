@@ -50,17 +50,20 @@ function randomState(): string {
   return crypto.randomUUID()
 }
 
+// No trailing slash — must byte-for-byte match whatever's registered as the
+// app's Redirect URI in Intuit's Keys & Credentials settings.
+const REDIRECT_URI = window.location.origin
+
 /** Redirects the browser to QuickBooks' OAuth consent screen. */
 export function redirectToQboConsent(): void {
   const clientId = import.meta.env.VITE_QBO_CLIENT_ID
   const state = randomState()
   sessionStorage.setItem(STATE_KEY, state)
-  const redirectUri = `${window.location.origin}/`
   const params = new URLSearchParams({
     client_id: clientId,
     response_type: 'code',
     scope: 'com.intuit.quickbooks.accounting',
-    redirect_uri: redirectUri,
+    redirect_uri: REDIRECT_URI,
     state,
   })
   window.location.href = `https://appcenter.intuit.com/connect/oauth2?${params}`
@@ -90,7 +93,7 @@ export async function completeOAuthCallback(): Promise<string | null> {
   if (!expectedState || state !== expectedState) return 'QuickBooks sign-in state mismatch — please try connecting again.'
 
   try {
-    await authedFetch('qbo-oauth-callback', { code, realmId, redirectUri: `${window.location.origin}/` })
+    await authedFetch('qbo-oauth-callback', { code, realmId, redirectUri: REDIRECT_URI })
     return null
   } catch (err) {
     return err instanceof Error ? err.message : 'Could not complete QuickBooks connection.'
