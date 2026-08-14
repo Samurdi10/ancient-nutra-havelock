@@ -72,16 +72,24 @@ export function QuickBooksTab() {
     if (!status?.connected) return
     async function loadMappingData() {
       try {
-        const [items, map, priceRows] = await Promise.all([
+        const [items, map, priceRows, billItemRows] = await Promise.all([
           listQboItems(),
           fetchQboItemMap(),
-          supabase.from('havelock_product_prices').select('product_name').order('product_name'),
+          supabase.from('havelock_product_prices').select('product_name'),
+          // The QBO push looks up havelock_qbo_item_map by a bill's exact item
+          // name, which sometimes differs from the Price List's product name
+          // (e.g. "Ashwagandha Extract" vs "Ashwagandha Extract - 60
+          // capsules") — without this, those items could never be mapped.
+          supabase.from('havelock_bill_items').select('product_name'),
         ])
         setQboItems(items)
         const mapObj: Record<string, { id: string; name: string }> = {}
         for (const row of map) mapObj[row.product_name] = { id: row.qbo_item_id, name: row.qbo_item_name }
         setItemMap(mapObj)
-        setProducts((priceRows.data ?? []).map((r) => r.product_name))
+        const allNames = new Set<string>()
+        for (const r of priceRows.data ?? []) allNames.add(r.product_name)
+        for (const r of billItemRows.data ?? []) allNames.add(r.product_name)
+        setProducts([...allNames].sort())
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Could not load QuickBooks items.')
       }
