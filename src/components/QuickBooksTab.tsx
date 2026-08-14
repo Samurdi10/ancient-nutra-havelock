@@ -14,6 +14,18 @@ import {
   type QboItemOption,
 } from '../lib/qbo'
 
+interface PushedInvoice {
+  billId: string
+  reportDate: string
+  billTime: string
+  invoiceNumber: string
+  netTotal: number
+  status: 'success' | 'error'
+  qboId: string | null
+  error: string | null
+  createdAt: string
+}
+
 export function QuickBooksTab() {
   const [status, setStatus] = useState<QboStatus | null>(null)
   const [loading, setLoading] = useState(true)
@@ -24,6 +36,8 @@ export function QuickBooksTab() {
   const [search, setSearch] = useState('')
   const [autoMapping, setAutoMapping] = useState(false)
   const [autoMapSummary, setAutoMapSummary] = useState<{ mapped: number; remaining: number } | null>(null)
+  const [invoices, setInvoices] = useState<PushedInvoice[]>([])
+  const [invoicesLoading, setInvoicesLoading] = useState(false)
 
   async function refreshStatus() {
     setLoading(true)
@@ -70,6 +84,64 @@ export function QuickBooksTab() {
       }
     }
     loadMappingData()
+  }, [status?.connected])
+
+  async function loadInvoices() {
+    setInvoicesLoading(true)
+    try {
+      // Sync log rows aren't FK-linked to havelock_bills (record_id is shared
+      // across bill/stock_entry/purchase_order types), so this joins them by
+      // hand: latest sync attempt per bill, then the matching bill rows.
+      const { data: logRows, error: logErr } = await supabase
+        .from('havelock_qbo_sync_log')
+        .select('record_id, status, qbo_id, error, created_at')
+        .eq('record_type', 'bill')
+        .order('created_at', { ascending: false })
+        .limit(500)
+      if (logErr) throw new Error(logErr.message)
+
+      const latestByBillId = new Map<string, (typeof logRows)[number]>()
+      for (const row of logRows ?? []) {
+        if (!latestByBillId.has(row.record_id)) latestByBillId.set(row.record_id, row)
+      }
+      const billIds = [...latestByBillId.keys()]
+      if (billIds.length === 0) {
+        setInvoices([])
+        return
+      }
+
+      const { data: billRows, error: billErr } = await supabase
+        .from('havelock_bills')
+        .select('id, report_date, bill_time, invoice_number, net_total')
+        .in('id', billIds)
+      if (billErr) throw new Error(billErr.message)
+
+      const merged: PushedInvoice[] = (billRows ?? [])
+        .map((bill) => {
+          const log = latestByBillId.get(bill.id)!
+          return {
+            billId: bill.id,
+            reportDate: bill.report_date,
+            billTime: bill.bill_time,
+            invoiceNumber: bill.invoice_number,
+            netTotal: bill.net_total,
+            status: log.status,
+            qboId: log.qbo_id,
+            error: log.error,
+            createdAt: log.created_at,
+          }
+        })
+        .sort((a, b) => (a.reportDate === b.reportDate ? (a.billTime < b.billTime ? 1 : -1) : a.reportDate < b.reportDate ? 1 : -1))
+      setInvoices(merged)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not load pushed invoices.')
+    } finally {
+      setInvoicesLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (status?.connected) loadInvoices()
   }, [status?.connected])
 
   const filteredProducts = useMemo(
@@ -222,6 +294,58 @@ export function QuickBooksTab() {
                 </tbody>
               </table>
             </div>
+          </div>
+
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h2 style={{ fontSize: 16 }}>Invoices pushed to QuickBooks</h2>
+              <button className="btn sm ghost" onClick={loadInvoices} disabled={invoicesLoading}>
+                {invoicesLoading ? 'Refreshing…' : 'Refresh'}
+              </button>
+            </div>
+            <p className="muted">
+              Every bill that's been pushed as a Sales Receipt (or attempted), most recent first.
+            </p>
+            {invoicesLoading ? (
+              <p className="muted">Loading…</p>
+            ) : invoices.length === 0 ? (
+              <p className="muted">No bills have been pushed yet.</p>
+            ) : (
+              <div className="tbl-wrap">
+                <table className="tbl">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Time</th>
+                      <th>Invoice No.</th>
+                      <th>Net Total</th>
+                      <th>Status</th>
+                      <th>QBO Sales Receipt Id</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {invoices.map((inv) => (
+                      <tr key={inv.billId}>
+                        <td>{inv.reportDate}</td>
+                        <td>{inv.billTime}</td>
+                        <td>{inv.invoiceNumber}</td>
+                        <td className="num">{inv.netTotal.toLocaleString()}</td>
+                        <td>
+                          {inv.status === 'success' ? (
+                            <span style={{ color: 'var(--green)' }}>Synced</span>
+                          ) : (
+                            <span style={{ color: 'var(--amber)' }} title={inv.error ?? undefined}>
+                              Failed{inv.error ? `: ${inv.error}` : ''}
+                            </span>
+                          )}
+                        </td>
+                        <td>{inv.qboId ?? '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </>
       )}
