@@ -112,6 +112,10 @@ Deno.serve(async (req) => {
       TxnDate: bill.report_date,
       DocNumber: bill.invoice_number,
       CustomerRef: { value: customerRef.value },
+      // Non-US company files require this alongside each line's TaxCodeRef,
+      // or QBO rejects the transaction with "Make sure all your transactions
+      // have a sales tax rate before you save" even when lines are marked NON.
+      GlobalTaxCalculation: 'TaxExcluded',
       Line: lines,
     })
     const qboId = (receipt as { SalesReceipt?: { Id?: string } }).SalesReceipt?.Id
