@@ -10,6 +10,7 @@ import {
   upsertQboItemMap,
   removeQboItemMap,
   normalizeProductName,
+  syncBill,
   type QboStatus,
   type QboItemOption,
 } from '../lib/qbo'
@@ -38,6 +39,8 @@ export function QuickBooksTab() {
   const [autoMapSummary, setAutoMapSummary] = useState<{ mapped: number; remaining: number } | null>(null)
   const [invoices, setInvoices] = useState<PushedInvoice[]>([])
   const [invoicesLoading, setInvoicesLoading] = useState(false)
+  const [retryingAll, setRetryingAll] = useState(false)
+  const [retryAllSummary, setRetryAllSummary] = useState<{ total: number; success: number } | null>(null)
 
   async function refreshStatus() {
     setLoading(true)
@@ -143,6 +146,24 @@ export function QuickBooksTab() {
   useEffect(() => {
     if (status?.connected) loadInvoices()
   }, [status?.connected])
+
+  /** Re-pushes every currently-failed bill at once — useful after fixing a
+   *  systemic issue (e.g. a missing tax code) that made many bills fail the
+   *  same way, so they don't need retrying one row at a time. */
+  async function handleRetryAllFailed() {
+    const failed = invoices.filter((inv) => inv.status === 'error')
+    if (failed.length === 0) return
+    setRetryingAll(true)
+    setRetryAllSummary(null)
+    try {
+      const results = await Promise.allSettled(failed.map((inv) => syncBill(inv.billId)))
+      const success = results.filter((r) => r.status === 'fulfilled' && !r.value.error).length
+      setRetryAllSummary({ total: failed.length, success })
+      await loadInvoices()
+    } finally {
+      setRetryingAll(false)
+    }
+  }
 
   const filteredProducts = useMemo(
     () => products.filter((p) => p.toLowerCase().includes(search.toLowerCase())),
@@ -299,13 +320,26 @@ export function QuickBooksTab() {
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h2 style={{ fontSize: 16 }}>Invoices pushed to QuickBooks</h2>
-              <button className="btn sm ghost" onClick={loadInvoices} disabled={invoicesLoading}>
-                {invoicesLoading ? 'Refreshing…' : 'Refresh'}
-              </button>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {invoices.some((inv) => inv.status === 'error') && (
+                  <button className="btn sm ghost" onClick={handleRetryAllFailed} disabled={retryingAll}>
+                    {retryingAll ? 'Retrying…' : 'Retry all failed'}
+                  </button>
+                )}
+                <button className="btn sm ghost" onClick={loadInvoices} disabled={invoicesLoading}>
+                  {invoicesLoading ? 'Refreshing…' : 'Refresh'}
+                </button>
+              </div>
             </div>
             <p className="muted">
               Every bill that's been pushed as a Sales Receipt (or attempted), most recent first.
             </p>
+            {retryAllSummary && (
+              <p className="muted">
+                Retried {retryAllSummary.total} bill{retryAllSummary.total === 1 ? '' : 's'} — {retryAllSummary.success} succeeded
+                {retryAllSummary.success < retryAllSummary.total ? `, ${retryAllSummary.total - retryAllSummary.success} still failing.` : '.'}
+              </p>
+            )}
             {invoicesLoading ? (
               <p className="muted">Loading…</p>
             ) : invoices.length === 0 ? (
