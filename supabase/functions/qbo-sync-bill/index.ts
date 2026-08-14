@@ -91,9 +91,11 @@ Deno.serve(async (req) => {
         Qty: item.quantity,
         // Havelock's POS data doesn't track a separate tax amount per bill,
         // and QBO's sales tax feature rejects a Sales Receipt with no tax
-        // code at all — mark every line non-taxable rather than attribute
-        // tax liability that isn't tracked or reconciled anywhere else.
-        TaxCodeRef: { value: 'NON' },
+        // code at all. "NON" isn't a valid code on this (non-US) company's
+        // own tax code list -- Id 2 is this company's real "VAT Exempted"
+        // code (queried via `select * from TaxCode`); "No Tax" (Id 4) exists
+        // too but is inactive, so QBO won't accept a reference to it.
+        TaxCodeRef: { value: '2' },
       },
     })
   }
