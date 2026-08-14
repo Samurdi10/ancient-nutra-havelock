@@ -196,3 +196,18 @@ export async function syncStockEntry(stockEntryId: string): Promise<SyncResult> 
 export async function syncPurchaseOrder(purchaseOrderId: string): Promise<SyncResult> {
   return (await authedFetch('qbo-sync-purchase-order', { purchaseOrderId })) as unknown as SyncResult
 }
+
+export interface QboSalesReceiptDetail {
+  id: string
+  docNumber: string | null
+  txnDate: string | null
+  totalAmt: number | null
+  customerName: string | null
+  lines: { itemName: string | null; qty: number | null; amount: number | null }[]
+}
+
+/** Fetches a Sales Receipt's details straight from QuickBooks, so staff can
+ *  review what actually landed there without leaving the app. */
+export async function getQboSalesReceipt(qboId: string): Promise<QboSalesReceiptDetail> {
+  return (await authedFetch('qbo-get-sales-receipt', { qboId })) as unknown as QboSalesReceiptDetail
+}
