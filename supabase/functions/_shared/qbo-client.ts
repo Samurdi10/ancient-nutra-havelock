@@ -102,7 +102,14 @@ export async function postQboEntity(
   })
   const payload = await res.json()
   if (!res.ok) {
-    const message = payload?.Fault?.Error?.[0]?.Message || JSON.stringify(payload)
+    // Intuit's `Message` is a generic wrapper ("A business validation error
+    // has occurred...") for many distinct causes — the actual reason is in
+    // `Detail` (and `code`), which the old version of this function dropped,
+    // making every failure look identical regardless of cause.
+    const apiError = payload?.Fault?.Error?.[0]
+    const message = apiError
+      ? `${apiError.Message}${apiError.Detail ? ` — ${apiError.Detail}` : ''}${apiError.code ? ` (code ${apiError.code})` : ''}`
+      : JSON.stringify(payload)
     throw new Error(`QBO ${entity} create failed: ${message}`)
   }
   return payload
