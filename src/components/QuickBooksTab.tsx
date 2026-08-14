@@ -11,8 +11,10 @@ import {
   removeQboItemMap,
   normalizeProductName,
   syncBill,
+  getQboSalesReceipt,
   type QboStatus,
   type QboItemOption,
+  type QboSalesReceiptDetail,
 } from '../lib/qbo'
 
 interface PushedInvoice {
@@ -41,6 +43,22 @@ export function QuickBooksTab() {
   const [invoicesLoading, setInvoicesLoading] = useState(false)
   const [retryingAll, setRetryingAll] = useState(false)
   const [retryAllSummary, setRetryAllSummary] = useState<{ total: number; success: number } | null>(null)
+  const [viewingReceipt, setViewingReceipt] = useState<QboSalesReceiptDetail | null>(null)
+  const [viewingLoading, setViewingLoading] = useState(false)
+  const [viewingError, setViewingError] = useState<string | null>(null)
+
+  async function handleViewReceipt(qboId: string) {
+    setViewingLoading(true)
+    setViewingError(null)
+    setViewingReceipt(null)
+    try {
+      setViewingReceipt(await getQboSalesReceipt(qboId))
+    } catch (err) {
+      setViewingError(err instanceof Error ? err.message : 'Could not load this Sales Receipt.')
+    } finally {
+      setViewingLoading(false)
+    }
+  }
 
   async function refreshStatus() {
     setLoading(true)
@@ -397,14 +415,9 @@ export function QuickBooksTab() {
                         <td>{inv.qboId ?? '—'}</td>
                         <td>
                           {inv.qboId && (
-                            <a
-                              className="btn sm ghost"
-                              href={`https://qbo.intuit.com/app/salesreceipt?txnId=${inv.qboId}`}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              View in QuickBooks
-                            </a>
+                            <button className="btn sm ghost" onClick={() => handleViewReceipt(inv.qboId!)}>
+                              View
+                            </button>
                           )}
                         </td>
                       </tr>
@@ -414,6 +427,57 @@ export function QuickBooksTab() {
               </div>
             )}
           </div>
+
+          {(viewingLoading || viewingError || viewingReceipt) && (
+            <div className="modal-backdrop">
+              <div className="modal-card" style={{ maxWidth: 600 }}>
+                <h2>Sales Receipt {viewingReceipt ? `#${viewingReceipt.docNumber ?? viewingReceipt.id}` : ''}</h2>
+                {viewingLoading && <p className="muted">Loading from QuickBooks…</p>}
+                {viewingError && <p className="error">{viewingError}</p>}
+                {viewingReceipt && (
+                  <>
+                    <p className="muted">
+                      {viewingReceipt.txnDate} · {viewingReceipt.customerName ?? 'Walk-in Customer'}
+                    </p>
+                    <div className="tbl-wrap">
+                      <table className="tbl">
+                        <thead>
+                          <tr>
+                            <th>Item</th>
+                            <th>Qty</th>
+                            <th>Amount</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {viewingReceipt.lines.map((line, idx) => (
+                            <tr key={idx}>
+                              <td>{line.itemName ?? '—'}</td>
+                              <td className="num">{line.qty ?? '—'}</td>
+                              <td className="num">{line.amount?.toLocaleString() ?? '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <p style={{ textAlign: 'right', fontWeight: 600 }}>
+                      Total: {viewingReceipt.totalAmt?.toLocaleString() ?? '—'}
+                    </p>
+                  </>
+                )}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                  <button
+                    className="btn ghost"
+                    onClick={() => {
+                      setViewingReceipt(null)
+                      setViewingError(null)
+                    }}
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>
