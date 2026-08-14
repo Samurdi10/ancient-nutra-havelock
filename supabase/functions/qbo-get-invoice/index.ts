@@ -1,22 +1,23 @@
-// Fetches one Sales Receipt's details straight from QuickBooks Online, so
-// staff can review what actually landed there without leaving the app.
+// Fetches one Invoice's details straight from QuickBooks Online, so staff
+// can review what actually landed there without leaving the app.
 // Call with { qboId }.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { CORS_HEADERS, jsonResponse, getValidConnection, queryQbo } from '../_shared/qbo-client.ts'
 
-interface QboSalesReceiptLine {
+interface QboInvoiceLine {
   Amount?: number
   SalesItemLineDetail?: { ItemRef?: { name?: string }; Qty?: number }
 }
 
-interface QboSalesReceipt {
+interface QboInvoice {
   Id: string
   DocNumber?: string
   TxnDate?: string
   TotalAmt?: number
+  Balance?: number
   CustomerRef?: { name?: string }
-  Line?: QboSalesReceiptLine[]
+  Line?: QboInvoiceLine[]
 }
 
 Deno.serve(async (req) => {
@@ -40,18 +41,18 @@ Deno.serve(async (req) => {
   try {
     const conn = await getValidConnection(supabase)
     const escaped = qboId.replace(/'/g, "\\'")
-    const result = await queryQbo(conn, `select * from SalesReceipt where Id = '${escaped}'`)
-    const receipt = (result as { QueryResponse?: { SalesReceipt?: QboSalesReceipt[] } }).QueryResponse
-      ?.SalesReceipt?.[0]
-    if (!receipt) return jsonResponse({ error: 'Sales Receipt not found in QuickBooks' }, 404)
+    const result = await queryQbo(conn, `select * from Invoice where Id = '${escaped}'`)
+    const invoice = (result as { QueryResponse?: { Invoice?: QboInvoice[] } }).QueryResponse?.Invoice?.[0]
+    if (!invoice) return jsonResponse({ error: 'Invoice not found in QuickBooks' }, 404)
 
     return jsonResponse({
-      id: receipt.Id,
-      docNumber: receipt.DocNumber ?? null,
-      txnDate: receipt.TxnDate ?? null,
-      totalAmt: receipt.TotalAmt ?? null,
-      customerName: receipt.CustomerRef?.name ?? null,
-      lines: (receipt.Line ?? [])
+      id: invoice.Id,
+      docNumber: invoice.DocNumber ?? null,
+      txnDate: invoice.TxnDate ?? null,
+      totalAmt: invoice.TotalAmt ?? null,
+      balance: invoice.Balance ?? null,
+      customerName: invoice.CustomerRef?.name ?? null,
+      lines: (invoice.Line ?? [])
         .filter((l) => l.SalesItemLineDetail)
         .map((l) => ({
           itemName: l.SalesItemLineDetail?.ItemRef?.name ?? null,

@@ -11,10 +11,10 @@ import {
   removeQboItemMap,
   normalizeProductName,
   syncBill,
-  getQboSalesReceipt,
+  getQboInvoice,
   type QboStatus,
   type QboItemOption,
-  type QboSalesReceiptDetail,
+  type QboInvoiceDetail,
 } from '../lib/qbo'
 
 interface PushedInvoice {
@@ -43,7 +43,7 @@ export function QuickBooksTab() {
   const [invoicesLoading, setInvoicesLoading] = useState(false)
   const [retryingAll, setRetryingAll] = useState(false)
   const [retryAllSummary, setRetryAllSummary] = useState<{ total: number; success: number } | null>(null)
-  const [viewingReceipt, setViewingReceipt] = useState<QboSalesReceiptDetail | null>(null)
+  const [viewingReceipt, setViewingReceipt] = useState<QboInvoiceDetail | null>(null)
   const [viewingLoading, setViewingLoading] = useState(false)
   const [viewingError, setViewingError] = useState<string | null>(null)
 
@@ -52,9 +52,9 @@ export function QuickBooksTab() {
     setViewingError(null)
     setViewingReceipt(null)
     try {
-      setViewingReceipt(await getQboSalesReceipt(qboId))
+      setViewingReceipt(await getQboInvoice(qboId))
     } catch (err) {
-      setViewingError(err instanceof Error ? err.message : 'Could not load this Sales Receipt.')
+      setViewingError(err instanceof Error ? err.message : 'Could not load this invoice.')
     } finally {
       setViewingLoading(false)
     }
@@ -370,7 +370,7 @@ export function QuickBooksTab() {
               </div>
             </div>
             <p className="muted">
-              Every bill that's been pushed as a Sales Receipt (or attempted), most recent first.
+              Every bill that's been pushed as an Invoice (or attempted), most recent first.
             </p>
             {retryAllSummary && (
               <p className="muted">
@@ -392,7 +392,7 @@ export function QuickBooksTab() {
                       <th>Invoice No.</th>
                       <th>Net Total</th>
                       <th>Status</th>
-                      <th>QBO Sales Receipt Id</th>
+                      <th>QBO Invoice Id</th>
                       <th></th>
                     </tr>
                   </thead>
@@ -431,7 +431,7 @@ export function QuickBooksTab() {
           {(viewingLoading || viewingError || viewingReceipt) && (
             <div className="modal-backdrop">
               <div className="modal-card" style={{ maxWidth: 600 }}>
-                <h2>Sales Receipt {viewingReceipt ? `#${viewingReceipt.docNumber ?? viewingReceipt.id}` : ''}</h2>
+                <h2>Invoice {viewingReceipt ? `#${viewingReceipt.docNumber ?? viewingReceipt.id}` : ''}</h2>
                 {viewingLoading && <p className="muted">Loading from QuickBooks…</p>}
                 {viewingError && <p className="error">{viewingError}</p>}
                 {viewingReceipt && (
@@ -461,6 +461,8 @@ export function QuickBooksTab() {
                     </div>
                     <p style={{ textAlign: 'right', fontWeight: 600 }}>
                       Total: {viewingReceipt.totalAmt?.toLocaleString() ?? '—'}
+                      {viewingReceipt.balance !== null &&
+                        ` · ${viewingReceipt.balance > 0 ? `Balance due: ${viewingReceipt.balance.toLocaleString()}` : 'Paid in full'}`}
                     </p>
                   </>
                 )}
