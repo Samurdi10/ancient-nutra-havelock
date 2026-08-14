@@ -155,18 +155,27 @@ export function QuickBooksTab() {
     if (status?.connected) loadInvoices()
   }, [status?.connected])
 
-  /** Re-pushes every currently-failed bill at once — useful after fixing a
-   *  systemic issue (e.g. a missing tax code) that made many bills fail the
-   *  same way, so they don't need retrying one row at a time. */
+  /** Re-pushes every currently-failed bill, one at a time — useful after
+   *  fixing a systemic issue (e.g. a missing tax code) that made many bills
+   *  fail the same way. Sequential (not Promise.all) because QBO's API
+   *  throttles a burst of concurrent requests from one connection with a 429
+   *  ThrottleExceeded, which firing them all at once reliably triggers. */
   async function handleRetryAllFailed() {
     const failed = invoices.filter((inv) => inv.status === 'error')
     if (failed.length === 0) return
     setRetryingAll(true)
     setRetryAllSummary(null)
     try {
-      const results = await Promise.allSettled(failed.map((inv) => syncBill(inv.billId)))
-      const success = results.filter((r) => r.status === 'fulfilled' && !r.value.error).length
-      setRetryAllSummary({ total: failed.length, success })
+      let success = 0
+      for (const inv of failed) {
+        try {
+          const result = await syncBill(inv.billId)
+          if (!result.error) success++
+        } catch {
+          // leave as failed — reflected in the final summary below
+        }
+        setRetryAllSummary({ total: failed.length, success })
+      }
       await loadInvoices()
     } finally {
       setRetryingAll(false)

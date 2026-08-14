@@ -1019,8 +1019,18 @@ export function HavelockReportPage({ userEmail }: { userEmail: string | null }) 
       // Auto-push every saved bill to QuickBooks — no manual "Push to
       // QuickBooks" step. Best-effort: a push failure (e.g. an unmapped
       // product) never undoes the save, it just shows up in the summary.
-      const results = await Promise.allSettled(billIds.map((id) => syncBill(id)))
-      const success = results.filter((r) => r.status === 'fulfilled' && !r.value.error).length
+      // Sequential, not Promise.all: QBO's API throttles a burst of
+      // concurrent requests from one connection with a 429 ThrottleExceeded,
+      // which firing a whole day's bills at once reliably triggers.
+      let success = 0
+      for (const id of billIds) {
+        try {
+          const result = await syncBill(id)
+          if (!result.error) success++
+        } catch {
+          // leave as failed — reflected in the final summary below
+        }
+      }
       setQboPushResult({ total: billIds.length, success })
     } catch (err) {
       setParseError(err instanceof Error ? err.message : 'Failed to save this report.')
