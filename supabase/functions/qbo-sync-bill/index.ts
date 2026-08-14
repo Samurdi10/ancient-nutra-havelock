@@ -86,7 +86,15 @@ Deno.serve(async (req) => {
     lines.push({
       Amount: item.net_total,
       DetailType: 'SalesItemLineDetail',
-      SalesItemLineDetail: { ItemRef: { value: itemRef.value, name: itemRef.name }, Qty: item.quantity },
+      SalesItemLineDetail: {
+        ItemRef: { value: itemRef.value, name: itemRef.name },
+        Qty: item.quantity,
+        // Havelock's POS data doesn't track a separate tax amount per bill,
+        // and QBO's sales tax feature rejects a Sales Receipt with no tax
+        // code at all — mark every line non-taxable rather than attribute
+        // tax liability that isn't tracked or reconciled anywhere else.
+        TaxCodeRef: { value: 'NON' },
+      },
     })
   }
 
