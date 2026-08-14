@@ -1019,13 +1019,15 @@ export function HavelockReportPage({ userEmail }: { userEmail: string | null }) 
       // Auto-push every saved bill to QuickBooks — no manual "Push to
       // QuickBooks" step. Best-effort: a push failure (e.g. an unmapped
       // product) never undoes the save, it just shows up in the summary.
-      // Sequential, not Promise.all: QBO's API throttles a burst of
-      // concurrent requests from one connection with a 429 ThrottleExceeded,
-      // which firing a whole day's bills at once reliably triggers.
+      // Sequential with a pause between each: QBO's API throttles both a
+      // burst of concurrent requests AND a fast sequential run with a 429
+      // ThrottleExceeded, so this waits between calls to stay clear of
+      // Intuit's sustained rate limit, not just its concurrency limit.
       let success = 0
-      for (const id of billIds) {
+      for (let i = 0; i < billIds.length; i++) {
+        if (i > 0) await new Promise((resolve) => setTimeout(resolve, 1200))
         try {
-          const result = await syncBill(id)
+          const result = await syncBill(billIds[i])
           if (!result.error) success++
         } catch {
           // leave as failed — reflected in the final summary below

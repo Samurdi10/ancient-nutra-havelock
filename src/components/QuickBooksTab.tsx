@@ -155,11 +155,13 @@ export function QuickBooksTab() {
     if (status?.connected) loadInvoices()
   }, [status?.connected])
 
-  /** Re-pushes every currently-failed bill, one at a time — useful after
-   *  fixing a systemic issue (e.g. a missing tax code) that made many bills
-   *  fail the same way. Sequential (not Promise.all) because QBO's API
-   *  throttles a burst of concurrent requests from one connection with a 429
-   *  ThrottleExceeded, which firing them all at once reliably triggers. */
+  /** Re-pushes every currently-failed bill, one at a time with a pause in
+   *  between — useful after fixing a systemic issue (e.g. a missing tax
+   *  code) that made many bills fail the same way. Sequential alone wasn't
+   *  enough: QBO's API still throttled the very first couple of one-at-a-
+   *  time requests right after a large burst, so this also waits between
+   *  each call to stay clear of Intuit's sustained rate limit, not just its
+   *  concurrency limit. */
   async function handleRetryAllFailed() {
     const failed = invoices.filter((inv) => inv.status === 'error')
     if (failed.length === 0) return
@@ -167,9 +169,10 @@ export function QuickBooksTab() {
     setRetryAllSummary(null)
     try {
       let success = 0
-      for (const inv of failed) {
+      for (let i = 0; i < failed.length; i++) {
+        if (i > 0) await new Promise((resolve) => setTimeout(resolve, 1200))
         try {
-          const result = await syncBill(inv.billId)
+          const result = await syncBill(failed[i].billId)
           if (!result.error) success++
         } catch {
           // leave as failed — reflected in the final summary below
