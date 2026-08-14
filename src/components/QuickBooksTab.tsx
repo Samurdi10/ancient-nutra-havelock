@@ -375,6 +375,7 @@ export function QuickBooksTab() {
                       <th>Net Total</th>
                       <th>Status</th>
                       <th>QBO Sales Receipt Id</th>
+                      <th></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -394,6 +395,18 @@ export function QuickBooksTab() {
                           )}
                         </td>
                         <td>{inv.qboId ?? '—'}</td>
+                        <td>
+                          {inv.qboId && (
+                            <a
+                              className="btn sm ghost"
+                              href={`https://qbo.intuit.com/app/salesreceipt?txnId=${inv.qboId}`}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              View in QuickBooks
+                            </a>
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
