@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase'
 import { parseHavelockReportPdf } from '../lib/parseHavelockReport'
 import { QuickBooksTab } from './QuickBooksTab'
 import { QboPushButton } from './QboPushButton'
-import { isOAuthCallback, syncBill, normalizeProductName } from '../lib/qbo'
+import { isOAuthCallback, syncBill, normalizeProductName, fetchLatestSyncStatuses } from '../lib/qbo'
 import type {
   Bill,
   ParsedReport,
@@ -287,6 +287,7 @@ export function HavelockReportPage({ userEmail }: { userEmail: string | null }) 
   const [preview, setPreview] = useState<{ report: ParsedReport; fileName: string } | null>(null)
   const [saving, setSaving] = useState(false)
   const [qboPushResult, setQboPushResult] = useState<{ total: number; success: number } | null>(null)
+  const [bulkPushing, setBulkPushing] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const range = useMemo(
@@ -1038,6 +1039,39 @@ export function HavelockReportPage({ userEmail }: { userEmail: string | null }) 
       setParseError(err instanceof Error ? err.message : 'Failed to save this report.')
     } finally {
       setSaving(false)
+    }
+  }
+
+  /** Pushes every bill in the current date range that isn't already synced
+   *  to QuickBooks — covers bills that were never attempted (e.g. all their
+   *  items were unmapped at the time) as well as ones that previously
+   *  errored, in one click instead of one row at a time. Sequential with a
+   *  pause between each, same as auto-push, to stay clear of QBO's throttle. */
+  async function handlePushAllPending() {
+    if (bills.length === 0) return
+    setBulkPushing(true)
+    setQboPushResult(null)
+    try {
+      const statuses = await fetchLatestSyncStatuses(
+        'bill',
+        bills.map((b) => b.id),
+      )
+      const pending = bills.filter((b) => statuses[b.id]?.status !== 'success')
+      let success = 0
+      for (let i = 0; i < pending.length; i++) {
+        if (i > 0) await new Promise((resolve) => setTimeout(resolve, 1200))
+        try {
+          const result = await syncBill(pending[i].id)
+          if (!result.error) success++
+        } catch {
+          // leave as failed — reflected in the final summary below
+        }
+      }
+      setQboPushResult({ total: pending.length, success })
+    } catch (err) {
+      setParseError(err instanceof Error ? err.message : 'Failed to push pending bills to QuickBooks.')
+    } finally {
+      setBulkPushing(false)
     }
   }
 
@@ -2196,6 +2230,9 @@ export function HavelockReportPage({ userEmail }: { userEmail: string | null }) 
             />
             <button className="btn ghost" onClick={handleDownload} disabled={bills.length === 0}>
               Download
+            </button>
+            <button className="btn ghost" onClick={handlePushAllPending} disabled={bulkPushing || bills.length === 0}>
+              {bulkPushing ? 'Pushing…' : 'Push all pending to QuickBooks'}
             </button>
             <button
               className="btn pri"

@@ -120,6 +120,10 @@ Deno.serve(async (req) => {
       // Amount), "NotApplicable" is the value that actually turns tax
       // handling off for this transaction.
       GlobalTaxCalculation: 'NotApplicable',
+      // Internal-only note (never shown to a customer, there isn't a real
+      // one) so these are recognizable as Havelock POS sales when browsing
+      // QBO's transaction list, distinct from any other Sales Receipts.
+      PrivateNote: `Havelock Daily Invoice — ${bill.invoice_number} (${bill.report_date}), total LKR ${bill.net_total}`,
       Line: lines,
     })
     const qboId = (receipt as { SalesReceipt?: { Id?: string } }).SalesReceipt?.Id
