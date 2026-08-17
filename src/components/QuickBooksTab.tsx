@@ -208,6 +208,18 @@ export function QuickBooksTab() {
     [products, search],
   )
 
+  const invoiceTotals = useMemo(() => {
+    const synced = invoices.filter((inv) => inv.status === 'success')
+    const failed = invoices.filter((inv) => inv.status === 'error')
+    return {
+      count: invoices.length,
+      sum: invoices.reduce((s, inv) => s + inv.netTotal, 0),
+      syncedCount: synced.length,
+      syncedSum: synced.reduce((s, inv) => s + inv.netTotal, 0),
+      failedCount: failed.length,
+    }
+  }, [invoices])
+
   async function handleMapChange(productName: string, itemId: string) {
     if (!itemId) {
       await removeQboItemMap(productName)
@@ -372,6 +384,16 @@ export function QuickBooksTab() {
             <p className="muted">
               Every bill that's been pushed as a Sales Receipt (or attempted), most recent first.
             </p>
+            {invoiceTotals.count > 0 && (
+              <p style={{ fontSize: 15, margin: '4px 0 12px' }}>
+                <strong>{invoiceTotals.count}</strong> invoice{invoiceTotals.count === 1 ? '' : 's'} listed —{' '}
+                <strong>{invoiceTotals.syncedCount}</strong> synced totalling{' '}
+                <strong>LKR {invoiceTotals.syncedSum.toLocaleString()}</strong>
+                {invoiceTotals.failedCount > 0 && (
+                  <span style={{ color: 'var(--amber)' }}> · {invoiceTotals.failedCount} still failing</span>
+                )}
+              </p>
+            )}
             {retryAllSummary && (
               <p className="muted">
                 Retried {retryAllSummary.total} bill{retryAllSummary.total === 1 ? '' : 's'} — {retryAllSummary.success} succeeded
