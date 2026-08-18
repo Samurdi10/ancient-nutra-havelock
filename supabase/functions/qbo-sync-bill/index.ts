@@ -1,15 +1,21 @@
 // Pushes one daily bill (havelock_bills + havelock_bill_items) to QuickBooks
-// Online as a Sales Receipt, which auto-decrements QBO Inventory on hand for
-// every mapped line item. Call with { billId }.
+// Online as an Invoice, which auto-decrements QBO Inventory on hand for every
+// mapped line item. Call with { billId }.
+//
+// Deliberately an Invoice, not a Sales Receipt, to match the transaction type
+// this business's other systems (e.g. AN Delivery) already push to this same
+// QBO company — even though these POS sales are paid immediately, so the
+// resulting Invoice shows as open/"Overdue" until someone records payment
+// against it in QuickBooks.
 //
 // Products with no row in havelock_qbo_item_map are skipped (not failed) and
 // listed back in the response as `unmappedProducts`, mirroring the warning
 // style already used for PDF-parsing and price-list mismatches in this app.
 //
-// QBO requires a CustomerRef on every Sales Receipt; retail POS sales aren't
-// tied to a real customer record, so every bill posts under one shared
-// "Walk-in Customer", found-or-created automatically (see
-// findOrCreateCustomerRef) — no manual QBO setup needed.
+// QBO requires a CustomerRef on every Invoice; retail POS sales aren't tied
+// to a real customer record, so every bill posts under one shared "Walk-in
+// Customer", found-or-created automatically (see findOrCreateCustomerRef) —
+// no manual QBO setup needed.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import {
@@ -90,8 +96,8 @@ Deno.serve(async (req) => {
         ItemRef: { value: itemRef.value, name: itemRef.name },
         Qty: item.quantity,
         // Havelock's POS data doesn't track a separate tax amount per bill,
-        // and QBO's sales tax feature rejects a Sales Receipt with no tax
-        // code at all. "NON" isn't a valid code on this (non-US) company's
+        // and QBO's sales tax feature rejects an Invoice with no tax code at
+        // all. "NON" isn't a valid code on this (non-US) company's
         // own tax code list -- Id 2 is this company's real "VAT Exempted"
         // code (queried via `select * from TaxCode`); "No Tax" (Id 4) exists
         // too but is inactive, so QBO won't accept a reference to it.
@@ -110,7 +116,7 @@ Deno.serve(async (req) => {
   try {
     const conn = await getValidConnection(supabase)
     const customerRef = await findOrCreateCustomerRef(conn, WALK_IN_CUSTOMER_NAME)
-    const receipt = await postQboEntity(conn, 'salesreceipt', {
+    const receipt = await postQboEntity(conn, 'invoice', {
       TxnDate: bill.report_date,
       DocNumber: bill.invoice_number,
       CustomerRef: { value: customerRef.value },
@@ -126,7 +132,7 @@ Deno.serve(async (req) => {
       PrivateNote: `Havelock Daily Invoice — ${bill.invoice_number} (${bill.report_date}), total LKR ${bill.net_total}`,
       Line: lines,
     })
-    const qboId = (receipt as { SalesReceipt?: { Id?: string } }).SalesReceipt?.Id
+    const qboId = (receipt as { Invoice?: { Id?: string } }).Invoice?.Id
     await logSyncResult(supabase, { recordType: 'bill', recordId: billId, status: 'success', qboId })
     return jsonResponse({ qboId, unmappedProducts })
   } catch (err) {
