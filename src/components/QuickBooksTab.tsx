@@ -43,6 +43,8 @@ export function QuickBooksTab() {
   const [invoicesLoading, setInvoicesLoading] = useState(false)
   const [retryingAll, setRetryingAll] = useState(false)
   const [retryAllSummary, setRetryAllSummary] = useState<{ total: number; success: number } | null>(null)
+  const [rePushingInvoices, setRePushingInvoices] = useState(false)
+  const [rePushSummary, setRePushSummary] = useState<{ total: number; success: number } | null>(null)
   const [viewingReceipt, setViewingReceipt] = useState<QboInvoiceDetail | null>(null)
   const [viewingLoading, setViewingLoading] = useState(false)
   const [viewingError, setViewingError] = useState<string | null>(null)
@@ -200,6 +202,52 @@ export function QuickBooksTab() {
       await loadInvoices()
     } finally {
       setRetryingAll(false)
+    }
+  }
+
+  /** Re-pushes every already-synced bill as a fresh Invoice, without
+   *  touching whatever Sales Receipt QuickBooks already has for it -- for
+   *  the batch of bills that were pushed before the switch from Sales
+   *  Receipt to Invoice. Clears their old sync-log rows first so the
+   *  idempotency check in qbo-sync-bill doesn't just return the existing
+   *  (Sales Receipt) id instead of creating a new Invoice. */
+  async function handleRePushAllAsInvoice() {
+    const toRePush = invoices.filter((inv) => inv.status === 'success')
+    if (toRePush.length === 0) return
+    if (
+      !window.confirm(
+        `This creates ${toRePush.length} new Invoice${toRePush.length === 1 ? '' : 's'} in QuickBooks for bills already pushed before — the existing Sales Receipts are left untouched. Continue?`,
+      )
+    ) {
+      return
+    }
+    setRePushingInvoices(true)
+    setRePushSummary(null)
+    try {
+      const billIds = toRePush.map((inv) => inv.billId)
+      const { error: deleteErr } = await supabase
+        .from('havelock_qbo_sync_log')
+        .delete()
+        .eq('record_type', 'bill')
+        .in('record_id', billIds)
+      if (deleteErr) throw new Error(deleteErr.message)
+
+      let success = 0
+      for (let i = 0; i < toRePush.length; i++) {
+        if (i > 0) await new Promise((resolve) => setTimeout(resolve, 1200))
+        try {
+          const result = await syncBill(toRePush[i].billId)
+          if (!result.error) success++
+        } catch {
+          // leave as failed — reflected in the final summary below
+        }
+        setRePushSummary({ total: toRePush.length, success })
+      }
+      await loadInvoices()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not re-push bills as invoices.')
+    } finally {
+      setRePushingInvoices(false)
     }
   }
 
@@ -376,6 +424,11 @@ export function QuickBooksTab() {
                     {retryingAll ? 'Retrying…' : 'Retry all failed'}
                   </button>
                 )}
+                {invoices.some((inv) => inv.status === 'success') && (
+                  <button className="btn sm ghost" onClick={handleRePushAllAsInvoice} disabled={rePushingInvoices}>
+                    {rePushingInvoices ? 'Re-pushing…' : 'Re-push all as Invoice'}
+                  </button>
+                )}
                 <button className="btn sm ghost" onClick={loadInvoices} disabled={invoicesLoading}>
                   {invoicesLoading ? 'Refreshing…' : 'Refresh'}
                 </button>
@@ -398,6 +451,12 @@ export function QuickBooksTab() {
               <p className="muted">
                 Retried {retryAllSummary.total} bill{retryAllSummary.total === 1 ? '' : 's'} — {retryAllSummary.success} succeeded
                 {retryAllSummary.success < retryAllSummary.total ? `, ${retryAllSummary.total - retryAllSummary.success} still failing.` : '.'}
+              </p>
+            )}
+            {rePushSummary && (
+              <p className="muted">
+                Re-pushed {rePushSummary.total} bill{rePushSummary.total === 1 ? '' : 's'} as Invoices — {rePushSummary.success} succeeded
+                {rePushSummary.success < rePushSummary.total ? `, ${rePushSummary.total - rePushSummary.success} failed.` : '.'}
               </p>
             )}
             {invoicesLoading ? (
