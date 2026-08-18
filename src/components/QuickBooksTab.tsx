@@ -225,12 +225,23 @@ export function QuickBooksTab() {
     setRePushSummary(null)
     try {
       const billIds = toRePush.map((inv) => inv.billId)
-      const { error: deleteErr } = await supabase
+      // .select() here isn't for display -- it's what makes the delete
+      // actually report which rows it removed, so a permissions issue that
+      // silently filters this down to zero rows (as RLS did before the
+      // delete grant existed) surfaces as a mismatch instead of appearing to
+      // "succeed" while every bill just hands back its old Sales Receipt id.
+      const { data: deletedRows, error: deleteErr } = await supabase
         .from('havelock_qbo_sync_log')
         .delete()
         .eq('record_type', 'bill')
         .in('record_id', billIds)
+        .select('record_id')
       if (deleteErr) throw new Error(deleteErr.message)
+      if ((deletedRows?.length ?? 0) < billIds.length) {
+        throw new Error(
+          `Only cleared ${deletedRows?.length ?? 0} of ${billIds.length} old sync records — stopping before re-pushing, since the rest would just return their existing (Sales Receipt) id instead of a new Invoice.`,
+        )
+      }
 
       let success = 0
       for (let i = 0; i < toRePush.length; i++) {
