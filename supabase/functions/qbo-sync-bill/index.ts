@@ -23,6 +23,7 @@ import {
   jsonResponse,
   getValidConnection,
   postQboEntity,
+  queryQbo,
   findQboItemRef,
   findOrCreateCustomerRef,
   logSyncResult,
@@ -136,7 +137,31 @@ Deno.serve(async (req) => {
     await logSyncResult(supabase, { recordType: 'bill', recordId: billId, status: 'success', qboId })
     return jsonResponse({ qboId, unmappedProducts })
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
+    let message = err instanceof Error ? err.message : String(err)
+
+    // "Duplicate Document Number" (QBO error code 6140) means an Invoice with
+    // this DocNumber already exists in QBO — almost always because an earlier
+    // attempt for this exact bill DID create it there, but something after
+    // that call failed (e.g. a token refresh mid-flight) before we recorded
+    // success locally. Our own idempotency check above only knows about our
+    // own successful log rows, so it can't catch this; treat "QBO already has
+    // it" as success too, rather than erroring forever on every retry.
+    if (message.includes('code 6140')) {
+      try {
+        const conn = await getValidConnection(supabase)
+        const escapedDocNumber = bill.invoice_number.replace(/'/g, "\\'")
+        const result = await queryQbo(conn, `select Id from Invoice where DocNumber = '${escapedDocNumber}'`)
+        const foundId = (result as { QueryResponse?: { Invoice?: { Id: string }[] } }).QueryResponse?.Invoice?.[0]?.Id
+        if (foundId) {
+          await logSyncResult(supabase, { recordType: 'bill', recordId: billId, status: 'success', qboId: foundId })
+          return jsonResponse({ qboId: foundId, unmappedProducts, recoveredFromDuplicate: true })
+        }
+        message = `${message} (also failed to find the existing invoice by DocNumber to recover)`
+      } catch {
+        message = `${message} (also failed to look up the existing invoice by DocNumber to recover)`
+      }
+    }
+
     await logSyncResult(supabase, { recordType: 'bill', recordId: billId, status: 'error', error: message })
     return jsonResponse({ error: message, unmappedProducts }, 502)
   }
