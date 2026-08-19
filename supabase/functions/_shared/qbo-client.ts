@@ -31,8 +31,19 @@ async function refreshAccessToken(refreshToken: string): Promise<{
   expires_in: number
   x_refresh_token_expires_in: number
 }> {
-  const clientId = Deno.env.get('QBO_CLIENT_ID')!
-  const clientSecret = Deno.env.get('QBO_CLIENT_SECRET')!
+  const clientId = Deno.env.get('QBO_CLIENT_ID')
+  const clientSecret = Deno.env.get('QBO_CLIENT_SECRET')
+  // A missing secret silently produces a Basic-auth header for "undefined:undefined"
+  // (or half of the pair), which Intuit correctly rejects as invalid_client — but
+  // that response looks identical to "the secret was rotated in Intuit and Supabase
+  // wasn't updated to match", which is a completely different fix. Failing fast here,
+  // before the network call, makes the "not configured on this function" case
+  // immediately distinguishable from "Intuit rejected the credentials we sent".
+  if (!clientId || !clientSecret) {
+    throw new Error(
+      'QBO token refresh failed: QBO_CLIENT_ID/QBO_CLIENT_SECRET are not set as Supabase function secrets for this project — set them (from the Intuit app\'s Keys & Credentials page) before treating this as an Intuit-side problem.',
+    )
+  }
   const basicAuth = btoa(`${clientId}:${clientSecret}`)
 
   const res = await fetch('https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer', {
@@ -45,7 +56,18 @@ async function refreshAccessToken(refreshToken: string): Promise<{
     body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken }),
   })
   if (!res.ok) {
-    throw new Error(`QBO token refresh failed: ${res.status} ${await res.text()}`)
+    const body = await res.text()
+    // invalid_client specifically means Intuit rejected the client_id/secret pair
+    // itself (as opposed to invalid_grant, a bad/expired/reused refresh token) —
+    // almost always because the Intuit app's secret was regenerated on the Keys &
+    // Credentials page after QBO_CLIENT_SECRET was last set here. Reconnecting
+    // (the OAuth consent flow) does NOT fix this; QBO_CLIENT_SECRET must be updated
+    // to match Intuit's current value first, or every refresh (and every future
+    // reconnect, since qbo-oauth-callback uses the same secret) will keep failing.
+    const hint = body.includes('invalid_client')
+      ? ' — this means the app credentials Intuit has on file no longer match QBO_CLIENT_ID/QBO_CLIENT_SECRET here (most likely the secret was regenerated in Intuit\'s Keys & Credentials page); update the Supabase secret to match, reconnecting will not help'
+      : ''
+    throw new Error(`QBO token refresh failed: ${res.status} ${body}${hint}`)
   }
   return res.json()
 }
