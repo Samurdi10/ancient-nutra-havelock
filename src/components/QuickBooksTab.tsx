@@ -133,7 +133,19 @@ export function QuickBooksTab() {
 
       const latestByBillId = new Map<string, (typeof logRows)[number]>()
       for (const row of logRows ?? []) {
-        if (!latestByBillId.has(row.record_id)) latestByBillId.set(row.record_id, row)
+        const existing = latestByBillId.get(row.record_id)
+        if (!existing) {
+          latestByBillId.set(row.record_id, row)
+        } else if (existing.status !== 'success' && row.status === 'success') {
+          // Rows are in descending time order, so `existing` is chronologically
+          // newer than `row` here -- but once a bill has ever synced, that
+          // should stick. A later failed attempt (e.g. two near-simultaneous
+          // retries racing against each other, or one landing on a stale
+          // function version mid-deploy) doesn't mean QBO lost the invoice;
+          // qbo-sync-bill's own idempotency check already treats a prior
+          // success as authoritative for the exact same reason.
+          latestByBillId.set(row.record_id, row)
+        }
       }
       const billIds = [...latestByBillId.keys()]
       if (billIds.length === 0) {
