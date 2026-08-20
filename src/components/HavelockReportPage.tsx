@@ -286,7 +286,11 @@ export function HavelockReportPage({ userEmail }: { userEmail: string | null }) 
   const [parseError, setParseError] = useState<string | null>(null)
   const [preview, setPreview] = useState<{ report: ParsedReport; fileName: string } | null>(null)
   const [saving, setSaving] = useState(false)
-  const [qboPushResult, setQboPushResult] = useState<{ total: number; success: number } | null>(null)
+  const [qboPushResult, setQboPushResult] = useState<{
+    total: number
+    success: number
+    failures: { invoiceNumber: string; error: string }[]
+  } | null>(null)
   const [bulkPushing, setBulkPushing] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -1025,16 +1029,28 @@ export function HavelockReportPage({ userEmail }: { userEmail: string | null }) 
       // ThrottleExceeded, so this waits between calls to stay clear of
       // Intuit's sustained rate limit, not just its concurrency limit.
       let success = 0
+      const failures: { invoiceNumber: string; error: string }[] = []
       for (let i = 0; i < billIds.length; i++) {
         if (i > 0) await new Promise((resolve) => setTimeout(resolve, 1200))
         try {
           const result = await syncBill(billIds[i])
-          if (!result.error) success++
-        } catch {
-          // leave as failed — reflected in the final summary below
+          if (result.error) failures.push({ invoiceNumber: preview.report.bills[i].invoiceNumber, error: result.error })
+          else success++
+        } catch (err) {
+          // A throw here (as opposed to a { error } response) means the
+          // request never reached qbo-sync-bill's own logging at all — e.g.
+          // a network failure — so havelock_qbo_sync_log has NO record of
+          // this attempt. Surfacing the real message here, immediately, is
+          // the only place this failure is visible; silently counting it as
+          // "not succeeded" would make it indistinguishable from a bill that
+          // was simply never attempted.
+          failures.push({
+            invoiceNumber: preview.report.bills[i].invoiceNumber,
+            error: err instanceof Error ? err.message : String(err),
+          })
         }
       }
-      setQboPushResult({ total: billIds.length, success })
+      setQboPushResult({ total: billIds.length, success, failures })
     } catch (err) {
       setParseError(err instanceof Error ? err.message : 'Failed to save this report.')
     } finally {
@@ -1058,16 +1074,24 @@ export function HavelockReportPage({ userEmail }: { userEmail: string | null }) 
       )
       const pending = bills.filter((b) => statuses[b.id]?.status !== 'success')
       let success = 0
+      const failures: { invoiceNumber: string; error: string }[] = []
       for (let i = 0; i < pending.length; i++) {
         if (i > 0) await new Promise((resolve) => setTimeout(resolve, 1200))
         try {
           const result = await syncBill(pending[i].id)
-          if (!result.error) success++
-        } catch {
-          // leave as failed — reflected in the final summary below
+          if (result.error) failures.push({ invoiceNumber: pending[i].invoice_number, error: result.error })
+          else success++
+        } catch (err) {
+          // See the matching comment in handleConfirmSave — a throw here means
+          // this attempt never reached qbo-sync-bill's own logging, so this
+          // message is the only record of it anywhere.
+          failures.push({
+            invoiceNumber: pending[i].invoice_number,
+            error: err instanceof Error ? err.message : String(err),
+          })
         }
       }
-      setQboPushResult({ total: pending.length, success })
+      setQboPushResult({ total: pending.length, success, failures })
     } catch (err) {
       setParseError(err instanceof Error ? err.message : 'Failed to push pending bills to QuickBooks.')
     } finally {
@@ -2319,11 +2343,22 @@ export function HavelockReportPage({ userEmail }: { userEmail: string | null }) 
         {parseError && <p className="error">{parseError}</p>}
         {loadError && <p className="error">{loadError}</p>}
         {qboPushResult && (
-          <p className={qboPushResult.success === qboPushResult.total ? 'muted' : 'error'}>
-            {qboPushResult.success === qboPushResult.total
-              ? `Pushed all ${qboPushResult.total} bill${qboPushResult.total === 1 ? '' : 's'} to QuickBooks.`
-              : `Pushed ${qboPushResult.success}/${qboPushResult.total} bills to QuickBooks — check the QuickBooks tab for details on the rest.`}
-          </p>
+          <div style={{ marginBottom: 8 }}>
+            <p className={qboPushResult.success === qboPushResult.total ? 'muted' : 'error'}>
+              {qboPushResult.success === qboPushResult.total
+                ? `Pushed all ${qboPushResult.total} bill${qboPushResult.total === 1 ? '' : 's'} to QuickBooks.`
+                : `Pushed ${qboPushResult.success}/${qboPushResult.total} bills to QuickBooks.`}
+            </p>
+            {qboPushResult.failures.length > 0 && (
+              <div className="panel" style={{ padding: 12, borderColor: 'var(--red)' }}>
+                {qboPushResult.failures.map((f, i) => (
+                  <p key={i} className="error" style={{ margin: '2px 0' }}>
+                    Invoice {f.invoiceNumber}: {f.error}
+                  </p>
+                ))}
+              </div>
+            )}
+          </div>
         )}
 
         {preview && (
