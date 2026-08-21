@@ -12,6 +12,7 @@ import {
   normalizeProductName,
   syncBill,
   getQboInvoice,
+  markInvoicePaid,
   type QboStatus,
   type QboItemOption,
   type QboInvoiceDetail,
@@ -45,6 +46,10 @@ export function QuickBooksTab() {
   const [retryAllSummary, setRetryAllSummary] = useState<{ total: number; success: number } | null>(null)
   const [rePushingInvoices, setRePushingInvoices] = useState(false)
   const [rePushSummary, setRePushSummary] = useState<{ total: number; success: number } | null>(null)
+  const [markingAllPaid, setMarkingAllPaid] = useState(false)
+  const [markPaidSummary, setMarkPaidSummary] = useState<{ total: number; paid: number; alreadyPaid: number; failed: number } | null>(
+    null,
+  )
   const [viewingReceipt, setViewingReceipt] = useState<QboInvoiceDetail | null>(null)
   const [viewingLoading, setViewingLoading] = useState(false)
   const [viewingError, setViewingError] = useState<string | null>(null)
@@ -274,6 +279,37 @@ export function QuickBooksTab() {
     }
   }
 
+  /** Records a Payment against every synced bill's Invoice for its full
+   *  balance — these are POS sales already paid at checkout, but pushing
+   *  them as Invoices leaves them open/"Overdue" in QuickBooks until this
+   *  runs. Sequential with a pause between each, same throttle-avoidance as
+   *  the other bulk actions here. */
+  async function handleMarkAllPaid() {
+    const toMark = invoices.filter((inv) => inv.status === 'success' && inv.qboId)
+    if (toMark.length === 0) return
+    setMarkingAllPaid(true)
+    setMarkPaidSummary(null)
+    try {
+      let paid = 0
+      let alreadyPaid = 0
+      let failed = 0
+      for (let i = 0; i < toMark.length; i++) {
+        if (i > 0) await new Promise((resolve) => setTimeout(resolve, 1200))
+        try {
+          const result = await markInvoicePaid(toMark[i].billId)
+          if (result.error) failed++
+          else if (result.alreadyPaid) alreadyPaid++
+          else paid++
+        } catch {
+          failed++
+        }
+        setMarkPaidSummary({ total: toMark.length, paid, alreadyPaid, failed })
+      }
+    } finally {
+      setMarkingAllPaid(false)
+    }
+  }
+
   const filteredProducts = useMemo(
     () => products.filter((p) => p.toLowerCase().includes(search.toLowerCase())),
     [products, search],
@@ -452,6 +488,11 @@ export function QuickBooksTab() {
                     {rePushingInvoices ? 'Re-pushing…' : 'Re-push all as Invoice'}
                   </button>
                 )}
+                {invoices.some((inv) => inv.status === 'success' && inv.qboId) && (
+                  <button className="btn sm ghost" onClick={handleMarkAllPaid} disabled={markingAllPaid}>
+                    {markingAllPaid ? 'Marking as paid…' : 'Mark all as paid'}
+                  </button>
+                )}
                 <button className="btn sm ghost" onClick={loadInvoices} disabled={invoicesLoading}>
                   {invoicesLoading ? 'Refreshing…' : 'Refresh'}
                 </button>
@@ -480,6 +521,13 @@ export function QuickBooksTab() {
               <p className="muted">
                 Re-pushed {rePushSummary.total} bill{rePushSummary.total === 1 ? '' : 's'} as Invoices — {rePushSummary.success} succeeded
                 {rePushSummary.success < rePushSummary.total ? `, ${rePushSummary.total - rePushSummary.success} failed.` : '.'}
+              </p>
+            )}
+            {markPaidSummary && (
+              <p className="muted">
+                Processed {markPaidSummary.total} invoice{markPaidSummary.total === 1 ? '' : 's'} — {markPaidSummary.paid} newly marked paid
+                {markPaidSummary.alreadyPaid > 0 ? `, ${markPaidSummary.alreadyPaid} already paid` : ''}
+                {markPaidSummary.failed > 0 ? `, ${markPaidSummary.failed} failed.` : '.'}
               </p>
             )}
             {invoicesLoading ? (

@@ -212,3 +212,18 @@ export interface QboInvoiceDetail {
 export async function getQboInvoice(qboId: string): Promise<QboInvoiceDetail> {
   return (await authedFetch('qbo-get-invoice', { qboId })) as unknown as QboInvoiceDetail
 }
+
+interface MarkPaidResult {
+  paymentId?: string
+  amount?: number
+  alreadyPaid?: boolean
+  error?: string
+}
+
+/** Records a Payment against a bill's Invoice for its full balance
+ *  (deposited to Undeposited Funds) — these POS sales were paid in full at
+ *  checkout, but pushing them as Invoices leaves them open in QuickBooks
+ *  until this step runs. */
+export async function markInvoicePaid(billId: string): Promise<MarkPaidResult> {
+  return (await authedFetch('qbo-mark-invoice-paid', { billId })) as unknown as MarkPaidResult
+}
