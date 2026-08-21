@@ -13,9 +13,12 @@
 // style already used for PDF-parsing and price-list mismatches in this app.
 //
 // QBO requires a CustomerRef on every Invoice; retail POS sales aren't tied
-// to a real customer record, so every bill posts under one shared "Walk-in
-// Customer", found-or-created automatically (see findOrCreateCustomerRef) —
-// no manual QBO setup needed.
+// to a real customer record, so every bill posts under one shared customer
+// named for this outlet specifically, found-or-created automatically (see
+// findOrCreateCustomerRef) — no manual QBO setup needed. Named for the
+// outlet rather than a generic "Walk-in Customer" so Havelock's retail sales
+// stay distinguishable from other channels (e.g. AN Delivery) that may push
+// to this same QBO company under their own generic customer.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import {
@@ -29,7 +32,7 @@ import {
   logSyncResult,
 } from '../_shared/qbo-client.ts'
 
-const WALK_IN_CUSTOMER_NAME = 'Walk-in Customer'
+const OUTLET_CUSTOMER_NAME = 'Ancient Nutra - Havelock City Mall'
 
 interface BillItemRow {
   product_name: string
@@ -116,7 +119,7 @@ Deno.serve(async (req) => {
 
   try {
     const conn = await getValidConnection(supabase)
-    const customerRef = await findOrCreateCustomerRef(conn, WALK_IN_CUSTOMER_NAME)
+    const customerRef = await findOrCreateCustomerRef(conn, OUTLET_CUSTOMER_NAME)
     const receipt = await postQboEntity(conn, 'invoice', {
       TxnDate: bill.report_date,
       DocNumber: bill.invoice_number,
