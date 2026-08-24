@@ -30,6 +30,21 @@ interface PushedInvoice {
   createdAt: string
 }
 
+/** Renders the real error text for each failed item in a bulk action, so a
+ *  failure is never just a number in a summary count. */
+function FailureList({ failures }: { failures: { invoiceNumber: string; error: string }[] }) {
+  if (failures.length === 0) return null
+  return (
+    <div className="panel" style={{ padding: 12, borderColor: 'var(--red)' }}>
+      {failures.map((f, i) => (
+        <p key={i} className="error" style={{ margin: '2px 0' }}>
+          Invoice {f.invoiceNumber}: {f.error}
+        </p>
+      ))}
+    </div>
+  )
+}
+
 export function QuickBooksTab() {
   const [status, setStatus] = useState<QboStatus | null>(null)
   const [loading, setLoading] = useState(true)
@@ -43,13 +58,25 @@ export function QuickBooksTab() {
   const [invoices, setInvoices] = useState<PushedInvoice[]>([])
   const [invoicesLoading, setInvoicesLoading] = useState(false)
   const [retryingAll, setRetryingAll] = useState(false)
-  const [retryAllSummary, setRetryAllSummary] = useState<{ total: number; success: number } | null>(null)
+  const [retryAllSummary, setRetryAllSummary] = useState<{
+    total: number
+    success: number
+    failures: { invoiceNumber: string; error: string }[]
+  } | null>(null)
   const [rePushingInvoices, setRePushingInvoices] = useState(false)
-  const [rePushSummary, setRePushSummary] = useState<{ total: number; success: number } | null>(null)
+  const [rePushSummary, setRePushSummary] = useState<{
+    total: number
+    success: number
+    failures: { invoiceNumber: string; error: string }[]
+  } | null>(null)
   const [markingAllPaid, setMarkingAllPaid] = useState(false)
-  const [markPaidSummary, setMarkPaidSummary] = useState<{ total: number; paid: number; alreadyPaid: number; failed: number } | null>(
-    null,
-  )
+  const [markPaidSummary, setMarkPaidSummary] = useState<{
+    total: number
+    paid: number
+    alreadyPaid: number
+    failed: number
+    failures: { invoiceNumber: string; error: string }[]
+  } | null>(null)
   const [viewingReceipt, setViewingReceipt] = useState<QboInvoiceDetail | null>(null)
   const [viewingLoading, setViewingLoading] = useState(false)
   const [viewingError, setViewingError] = useState<string | null>(null)
@@ -206,15 +233,20 @@ export function QuickBooksTab() {
     setRetryAllSummary(null)
     try {
       let success = 0
+      const failures: { invoiceNumber: string; error: string }[] = []
       for (let i = 0; i < failed.length; i++) {
         if (i > 0) await new Promise((resolve) => setTimeout(resolve, 1200))
         try {
           const result = await syncBill(failed[i].billId)
-          if (!result.error) success++
-        } catch {
-          // leave as failed — reflected in the final summary below
+          if (result.error) failures.push({ invoiceNumber: failed[i].invoiceNumber, error: result.error })
+          else success++
+        } catch (err) {
+          failures.push({
+            invoiceNumber: failed[i].invoiceNumber,
+            error: err instanceof Error ? err.message : String(err),
+          })
         }
-        setRetryAllSummary({ total: failed.length, success })
+        setRetryAllSummary({ total: failed.length, success, failures: [...failures] })
       }
       await loadInvoices()
     } finally {
@@ -261,15 +293,20 @@ export function QuickBooksTab() {
       }
 
       let success = 0
+      const failures: { invoiceNumber: string; error: string }[] = []
       for (let i = 0; i < toRePush.length; i++) {
         if (i > 0) await new Promise((resolve) => setTimeout(resolve, 1200))
         try {
           const result = await syncBill(toRePush[i].billId)
-          if (!result.error) success++
-        } catch {
-          // leave as failed — reflected in the final summary below
+          if (result.error) failures.push({ invoiceNumber: toRePush[i].invoiceNumber, error: result.error })
+          else success++
+        } catch (err) {
+          failures.push({
+            invoiceNumber: toRePush[i].invoiceNumber,
+            error: err instanceof Error ? err.message : String(err),
+          })
         }
-        setRePushSummary({ total: toRePush.length, success })
+        setRePushSummary({ total: toRePush.length, success, failures: [...failures] })
       }
       await loadInvoices()
     } catch (err) {
@@ -292,18 +329,21 @@ export function QuickBooksTab() {
     try {
       let paid = 0
       let alreadyPaid = 0
-      let failed = 0
+      const failures: { invoiceNumber: string; error: string }[] = []
       for (let i = 0; i < toMark.length; i++) {
         if (i > 0) await new Promise((resolve) => setTimeout(resolve, 1200))
         try {
           const result = await markInvoicePaid(toMark[i].billId)
-          if (result.error) failed++
+          if (result.error) failures.push({ invoiceNumber: toMark[i].invoiceNumber, error: result.error })
           else if (result.alreadyPaid) alreadyPaid++
           else paid++
-        } catch {
-          failed++
+        } catch (err) {
+          failures.push({
+            invoiceNumber: toMark[i].invoiceNumber,
+            error: err instanceof Error ? err.message : String(err),
+          })
         }
-        setMarkPaidSummary({ total: toMark.length, paid, alreadyPaid, failed })
+        setMarkPaidSummary({ total: toMark.length, paid, alreadyPaid, failed: failures.length, failures: [...failures] })
       }
     } finally {
       setMarkingAllPaid(false)
@@ -512,23 +552,32 @@ export function QuickBooksTab() {
               </p>
             )}
             {retryAllSummary && (
-              <p className="muted">
-                Retried {retryAllSummary.total} bill{retryAllSummary.total === 1 ? '' : 's'} — {retryAllSummary.success} succeeded
-                {retryAllSummary.success < retryAllSummary.total ? `, ${retryAllSummary.total - retryAllSummary.success} still failing.` : '.'}
-              </p>
+              <div style={{ marginBottom: 8 }}>
+                <p className="muted">
+                  Retried {retryAllSummary.total} bill{retryAllSummary.total === 1 ? '' : 's'} — {retryAllSummary.success} succeeded
+                  {retryAllSummary.success < retryAllSummary.total ? `, ${retryAllSummary.total - retryAllSummary.success} still failing.` : '.'}
+                </p>
+                <FailureList failures={retryAllSummary.failures} />
+              </div>
             )}
             {rePushSummary && (
-              <p className="muted">
-                Re-pushed {rePushSummary.total} bill{rePushSummary.total === 1 ? '' : 's'} as Invoices — {rePushSummary.success} succeeded
-                {rePushSummary.success < rePushSummary.total ? `, ${rePushSummary.total - rePushSummary.success} failed.` : '.'}
-              </p>
+              <div style={{ marginBottom: 8 }}>
+                <p className="muted">
+                  Re-pushed {rePushSummary.total} bill{rePushSummary.total === 1 ? '' : 's'} as Invoices — {rePushSummary.success} succeeded
+                  {rePushSummary.success < rePushSummary.total ? `, ${rePushSummary.total - rePushSummary.success} failed.` : '.'}
+                </p>
+                <FailureList failures={rePushSummary.failures} />
+              </div>
             )}
             {markPaidSummary && (
-              <p className="muted">
-                Processed {markPaidSummary.total} invoice{markPaidSummary.total === 1 ? '' : 's'} — {markPaidSummary.paid} newly marked paid
-                {markPaidSummary.alreadyPaid > 0 ? `, ${markPaidSummary.alreadyPaid} already paid` : ''}
-                {markPaidSummary.failed > 0 ? `, ${markPaidSummary.failed} failed.` : '.'}
-              </p>
+              <div style={{ marginBottom: 8 }}>
+                <p className="muted">
+                  Processed {markPaidSummary.total} invoice{markPaidSummary.total === 1 ? '' : 's'} — {markPaidSummary.paid} newly marked paid
+                  {markPaidSummary.alreadyPaid > 0 ? `, ${markPaidSummary.alreadyPaid} already paid` : ''}
+                  {markPaidSummary.failed > 0 ? `, ${markPaidSummary.failed} failed.` : '.'}
+                </p>
+                <FailureList failures={markPaidSummary.failures} />
+              </div>
             )}
             {invoicesLoading ? (
               <p className="muted">Loading…</p>
