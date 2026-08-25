@@ -292,6 +292,7 @@ export function HavelockReportPage({ userEmail }: { userEmail: string | null }) 
     failures: { invoiceNumber: string; error: string }[]
   } | null>(null)
   const [bulkPushing, setBulkPushing] = useState(false)
+  const [latestReportDate, setLatestReportDate] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const range = useMemo(
@@ -318,6 +319,33 @@ export function HavelockReportPage({ userEmail }: { userEmail: string | null }) 
     loadBillsForRange(range.start, range.end)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [range.start, range.end])
+
+  // Independent of the selected range/section — this checks the true latest
+  // uploaded report across all of Havelock's data, once on load, so a
+  // several-day gap in daily uploads (an easy thing to forget, since it's a
+  // fully manual step) surfaces the moment someone opens the app, on
+  // whichever section they land on, rather than staying invisible until
+  // someone notices a large reconciliation gap much later.
+  useEffect(() => {
+    async function loadLatestReportDate() {
+      const { data } = await supabase
+        .from('havelock_bills')
+        .select('report_date')
+        .order('report_date', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      setLatestReportDate(data?.report_date ?? null)
+    }
+    loadLatestReportDate()
+  }, [])
+
+  const daysSinceLatestReport = useMemo(() => {
+    if (!latestReportDate) return null
+    const latest = new Date(`${latestReportDate}T00:00:00`)
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    return Math.round((today.getTime() - latest.getTime()) / (24 * 60 * 60 * 1000))
+  }, [latestReportDate])
 
   async function loadPrices() {
     const { data } = await supabase
@@ -1237,6 +1265,30 @@ export function HavelockReportPage({ userEmail }: { userEmail: string | null }) 
       </aside>
 
       <main className="main">
+        {daysSinceLatestReport !== null && daysSinceLatestReport >= 2 && (
+          <div
+            className="panel"
+            style={{
+              padding: 12,
+              marginBottom: 16,
+              borderColor: 'var(--amber)',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: 12,
+            }}
+          >
+            <span>
+              ⚠ No new daily report uploaded in <strong>{daysSinceLatestReport} days</strong> — latest is{' '}
+              <strong>{latestReportDate}</strong>. Upload the missing day(s) to stay reconciled.
+            </span>
+            {activeSection !== 'report' && (
+              <button className="btn sm ghost" onClick={() => setActiveSection('report')}>
+                Go to Daily Report
+              </button>
+            )}
+          </div>
+        )}
         {activeSection === 'attendance' ? (
           <>
             <div className="topbar">
