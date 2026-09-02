@@ -32,7 +32,7 @@ import {
   logSyncResult,
 } from '../_shared/qbo-client.ts'
 
-const OUTLET_CUSTOMER_NAME = 'Ancient Nutra - Havelock City Mall'
+const OUTLET_CUSTOMER_NAME = 'Havelock Sales'
 
 interface BillItemRow {
   product_name: string
