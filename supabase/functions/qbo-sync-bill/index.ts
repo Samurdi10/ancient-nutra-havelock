@@ -127,12 +127,16 @@ Deno.serve(async (req) => {
       TxnDate: bill.report_date,
       DocNumber: bill.invoice_number,
       CustomerRef: { value: customerRef.value },
-      // "TaxExcluded"/"TaxInclusive" both tell QBO real tax calculation
-      // should still happen -- since we don't track or compute tax through
-      // this integration at all (it's already folded into each line's
-      // Amount), "NotApplicable" is the value that actually turns tax
-      // handling off for this transaction.
-      GlobalTaxCalculation: 'NotApplicable',
+      // "NotApplicable" (previously used here) does NOT actually turn tax
+      // off for this company -- verified live: QBO still added 18% VAT on
+      // top even with a genuinely exempt TaxCodeRef, meaning this company's
+      // Automated Sales Tax setup determines taxability from the QBO Item
+      // itself, not from anything sent on the transaction. "TaxInclusive"
+      // tells QBO the Line Amount already includes whatever tax it decides
+      // applies, so it's extracted from within instead of added on top --
+      // keeping the customer-facing/Invoice total equal to the real bill
+      // total either way.
+      GlobalTaxCalculation: 'TaxInclusive',
       // Internal-only note (never shown to a customer, there isn't a real
       // one) so these are recognizable as Havelock POS sales when browsing
       // QBO's transaction list, distinct from any other Sales Receipts.
