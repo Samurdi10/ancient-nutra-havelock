@@ -101,11 +101,14 @@ Deno.serve(async (req) => {
         Qty: item.quantity,
         // Havelock's POS data doesn't track a separate tax amount per bill,
         // and QBO's sales tax feature rejects an Invoice with no tax code at
-        // all. "NON" isn't a valid code on this (non-US) company's
-        // own tax code list -- Id 2 is this company's real "VAT Exempted"
-        // code (queried via `select * from TaxCode`); "No Tax" (Id 4) exists
-        // too but is inactive, so QBO won't accept a reference to it.
-        TaxCodeRef: { value: '2' },
+        // all. "NON" isn't a valid code on this (non-US) company's own tax
+        // code list. Id 2 was once this company's "VAT Exempted" code but
+        // has since been repurposed as the standard 18% "VAT" code (its
+        // SalesTaxRateList now points at the 18% rate) -- sending it was
+        // causing every invoice to be charged VAT instead of exempted. The
+        // current real "VAT Exempted" code is Id 5 (verified live via the
+        // qbo-tax-codes diagnostic: `select * from TaxCode`).
+        TaxCodeRef: { value: '5' },
       },
     })
   }
